@@ -16,7 +16,7 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 # ===========================================
 # Blog Configuration
 # ===========================================
-DEFAULT_AUTHOR_SLUG = os.getenv("DEFAULT_AUTHOR_SLUG", "clutchcaddie-team")
+DEFAULT_AUTHOR_SLUG = os.getenv("DEFAULT_AUTHOR_SLUG", "valiance-media")
 DEFAULT_STATUS = os.getenv("DEFAULT_STATUS", "draft")
 
 # ===========================================
