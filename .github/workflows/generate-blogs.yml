@@ -45,6 +45,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DEFAULT_AUTHOR_SLUG: ${{ vars.DEFAULT_AUTHOR_SLUG }}
+          DEFAULT_STATUS: ${{ vars.DEFAULT_STATUS }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
+          MAX_TURNS: ${{ vars.MAX_TURNS }}
         run: |
           python generator.py --status
 
@@ -54,6 +57,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DEFAULT_AUTHOR_SLUG: ${{ vars.DEFAULT_AUTHOR_SLUG }}
+          DEFAULT_STATUS: ${{ vars.DEFAULT_STATUS }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
+          MAX_TURNS: ${{ vars.MAX_TURNS }}
         run: |
           # Use input count if manual trigger, otherwise default to 1
           COUNT="${{ github.event.inputs.count || '1' }}"

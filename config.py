@@ -22,7 +22,7 @@ DEFAULT_STATUS = os.getenv("DEFAULT_STATUS", "draft")
 # ===========================================
 # Claude Configuration
 # ===========================================
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 MAX_TURNS = int(os.getenv("MAX_TURNS", "15"))
 
 # ===========================================
