@@ -36,6 +36,19 @@ When processing the idea queue:
 If anything fails, call `fail_blog_idea` with the error message.
 If the idea should be skipped (duplicate topic, etc.), call `skip_blog_idea` with reason.
 
+### CRITICAL: Topic Keyword Preservation (SEO)
+The `topic` field from blog ideas contains the **exact keyword phrase** we want to rank for in search engines. You MUST:
+
+1. **Include the topic keyword in the title** - The exact topic phrase (or very close variation) must appear in the post title. For example, if topic is "best golf drivers 2025", the title should be something like "Best Golf Drivers 2025: Complete Buying Guide"
+
+2. **Derive the slug from the topic** - The URL slug should be a URL-friendly version of the topic keyword. Example: topic "best golf drivers 2025" → slug "best-golf-drivers-2025"
+
+3. **Add the topic to SEO keywords** - The exact topic phrase MUST be included as the first item in the `seo.keywords` array
+
+4. **Use the topic naturally in content** - The topic keyword should appear naturally in the introduction, at least one h2 heading, and throughout the article body
+
+DO NOT rephrase or "improve" the topic keyword. If the topic is "how to fix a slice in golf", use THAT phrase, not a synonym like "correcting your curved shots".
+
 ---
 
 ## Content Block System (CRITICAL)
