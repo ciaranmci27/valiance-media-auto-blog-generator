@@ -9,6 +9,7 @@ from .query_tools import (
     get_blog_context,
     get_sample_post,
     check_slug_exists,
+    get_posts_without_images,
     QUERY_TOOLS,
 )
 
@@ -18,12 +19,12 @@ from .write_tools import (
     create_tag,
     link_tags_to_post,
     update_post_status,
+    update_post_image,
     WRITE_TOOLS,
 )
 
 from .idea_tools import (
-    get_next_blog_idea,
-    claim_blog_idea,
+    get_and_claim_blog_idea,
     complete_blog_idea,
     fail_blog_idea,
     skip_blog_idea,
@@ -36,6 +37,7 @@ __all__ = [
     "get_blog_context",
     "get_sample_post",
     "check_slug_exists",
+    "get_posts_without_images",
     "QUERY_TOOLS",
     # Write tools
     "create_blog_post",
@@ -43,10 +45,10 @@ __all__ = [
     "create_tag",
     "link_tags_to_post",
     "update_post_status",
+    "update_post_image",
     "WRITE_TOOLS",
     # Idea tools
-    "get_next_blog_idea",
-    "claim_blog_idea",
+    "get_and_claim_blog_idea",
     "complete_blog_idea",
     "fail_blog_idea",
     "skip_blog_idea",

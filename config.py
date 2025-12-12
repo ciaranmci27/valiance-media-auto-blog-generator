@@ -20,10 +20,44 @@ DEFAULT_AUTHOR_SLUG = os.getenv("DEFAULT_AUTHOR_SLUG", "valiance-media")
 DEFAULT_STATUS = os.getenv("DEFAULT_STATUS", "draft")
 
 # ===========================================
+# Category Configuration
+# ===========================================
+# Whether Claude can create new categories (default: false - use existing only)
+ALLOW_NEW_CATEGORIES = os.getenv("ALLOW_NEW_CATEGORIES", "false").lower() == "true"
+
+# Fallback category if no existing category fits (must exist in database)
+DEFAULT_CATEGORY_SLUG = os.getenv("DEFAULT_CATEGORY_SLUG", "general")
+
+# ===========================================
 # Claude Configuration
 # ===========================================
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 MAX_TURNS = int(os.getenv("MAX_TURNS", "15"))
+BLOGS_PER_RUN = int(os.getenv("BLOGS_PER_RUN", "1"))
+
+# ===========================================
+# Image Generation Configuration (Nano Banana / Gemini)
+# ===========================================
+ENABLE_IMAGE_GENERATION = os.getenv("ENABLE_IMAGE_GENERATION", "false").lower() == "true"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-image")
+IMAGE_ASPECT_RATIO = os.getenv("IMAGE_ASPECT_RATIO", "21:9")
+IMAGE_RESOLUTION = os.getenv("IMAGE_RESOLUTION", "2K")
+IMAGE_QUALITY = int(os.getenv("IMAGE_QUALITY", "85"))
+IMAGE_WIDTH = int(os.getenv("IMAGE_WIDTH", "1600"))
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "blog-images")
+
+# Context/theme for generated images (e.g., "golf course, outdoor sports, sunny day")
+IMAGE_CONTEXT = os.getenv("IMAGE_CONTEXT", "")
+
+# Style prefix for realistic photography - prepended to all image prompts
+# Includes "no text" instruction to prevent Gemini from rendering text in images
+IMAGE_STYLE_PREFIX = os.getenv(
+    "IMAGE_STYLE_PREFIX",
+    "Professional photograph, ultra realistic, high quality DSLR photography, "
+    "natural lighting, sharp focus, detailed textures, "
+    "no text, no words, no letters, no watermarks, no logos, no typography, "
+)
 
 # ===========================================
 # Content Block Types (for reference)
@@ -75,6 +109,10 @@ def validate_config():
         missing.append("SUPABASE_URL")
     if not SUPABASE_SERVICE_KEY:
         missing.append("SUPABASE_SERVICE_KEY")
+    
+    # Validate image generation config if enabled
+    if ENABLE_IMAGE_GENERATION and not GEMINI_API_KEY:
+        missing.append("GEMINI_API_KEY (required when ENABLE_IMAGE_GENERATION=true)")
 
     if missing:
         raise ValueError(

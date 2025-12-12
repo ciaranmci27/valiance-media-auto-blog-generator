@@ -17,59 +17,35 @@ from config import SUPABASE_URL, get_supabase_headers, DEFAULT_STATUS
 
 
 async def create_blog_post(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Create a new blog post in Supabase.
-
-    Args:
-        slug: URL-friendly identifier (lowercase, hyphens)
-        title: Post title
-        excerpt: Short description (2-3 sentences)
-        content: Array of content blocks (JSONB)
-        author_id: UUID of the author
-        category_id: UUID of the category (optional)
-        featured_image: URL to featured image (optional)
-        featured_image_alt: Alt text for featured image (optional)
-        reading_time: Estimated minutes to read (optional, auto-calculated if not provided)
-        featured: Whether to feature this post (default: false)
-        seo: SEO metadata object (optional)
-        status: 'draft', 'published', or 'archived' (default: from config)
-
-    Returns:
-        The created post with its ID
-    """
+    """Create a new blog post in Supabase. Optionally links tags in same call."""
     try:
         # Build the post data
         post_data = {
             "slug": args["slug"],
             "title": args["title"],
             "excerpt": args["excerpt"],
-            "content": args["content"],  # Should be array of content blocks
+            "content": args["content"],
             "author_id": args["author_id"],
             "status": args.get("status", DEFAULT_STATUS),
             "featured": args.get("featured", False),
-            "exclude_from_search": args.get("exclude_from_search", False),
         }
 
         # Optional fields
         if args.get("category_id"):
             post_data["category_id"] = args["category_id"]
-
         if args.get("featured_image"):
             post_data["featured_image"] = args["featured_image"]
-
         if args.get("featured_image_alt"):
             post_data["featured_image_alt"] = args["featured_image_alt"]
-
         if args.get("reading_time"):
             post_data["reading_time"] = args["reading_time"]
         else:
-            # Auto-calculate reading time (~200 words per minute)
             content_text = json.dumps(args["content"])
-            word_count = len(content_text.split())
-            post_data["reading_time"] = max(1, word_count // 200)
-
+            post_data["reading_time"] = max(1, len(content_text.split()) // 200)
         if args.get("seo"):
             post_data["seo"] = args["seo"]
+        if args.get("scheduled_at"):
+            post_data["scheduled_at"] = args["scheduled_at"]
 
         async with aiohttp.ClientSession() as session:
             headers = get_supabase_headers()
@@ -79,66 +55,49 @@ async def create_blog_post(args: dict[str, Any]) -> dict[str, Any]:
                 headers=headers,
                 json=post_data
             ) as resp:
-                if resp.status in [200, 201]:
-                    result = await resp.json()
-                    created_post = result[0] if isinstance(result, list) else result
-
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Successfully created blog post!\n\nPost ID: {created_post['id']}\nSlug: {created_post['slug']}\nTitle: {created_post['title']}\nStatus: {created_post['status']}\n\nIMPORTANT: If you need to add tags, use the link_tags_to_post tool with this post_id: {created_post['id']}"
-                        }]
-                    }
-                else:
+                if resp.status not in [200, 201]:
                     error = await resp.text()
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Failed to create post (HTTP {resp.status}): {error}"
-                        }],
-                        "is_error": True
-                    }
+                    return {"content": [{"type": "text", "text": f"Error: {error}"}], "is_error": True}
+
+                result = await resp.json()
+                created_post = result[0] if isinstance(result, list) else result
+                post_id = created_post['id']
+
+            # Link tags if provided (saves a separate tool call)
+            tag_ids = args.get("tag_ids", [])
+            tags_linked = 0
+            if tag_ids:
+                links = [{"post_id": post_id, "tag_id": tag_id} for tag_id in tag_ids]
+                async with session.post(
+                    f"{SUPABASE_URL}/rest/v1/blog_post_tags",
+                    headers=headers,
+                    json=links
+                ) as resp:
+                    if resp.status in [200, 201]:
+                        tags_linked = len(tag_ids)
+
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": f"Created: {post_id} ({created_post['slug']})" + (f" +{tags_linked} tags" if tags_linked else "")
+                }]
+            }
 
     except Exception as e:
-        return {
-            "content": [{
-                "type": "text",
-                "text": f"Error creating blog post: {str(e)}"
-            }],
-            "is_error": True
-        }
+        return {"content": [{"type": "text", "text": f"Error: {str(e)}"}], "is_error": True}
 
 
 async def create_category(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Create a new blog category.
-
-    Only create a new category if absolutely necessary - prefer using existing categories.
-
-    Args:
-        slug: URL-friendly identifier
-        name: Display name
-        description: Category description (optional)
-        seo: SEO metadata object (optional)
-
-    Returns:
-        The created category with its ID
-    """
+    """Create a new blog category. Prefer using existing categories."""
     try:
-        category_data = {
-            "slug": args["slug"],
-            "name": args["name"],
-        }
-
+        category_data = {"slug": args["slug"], "name": args["name"]}
         if args.get("description"):
             category_data["description"] = args["description"]
-
         if args.get("seo"):
             category_data["seo"] = args["seo"]
 
         async with aiohttp.ClientSession() as session:
             headers = get_supabase_headers()
-
             async with session.post(
                 f"{SUPABASE_URL}/rest/v1/blog_categories",
                 headers=headers,
@@ -147,55 +106,22 @@ async def create_category(args: dict[str, Any]) -> dict[str, Any]:
                 if resp.status in [200, 201]:
                     result = await resp.json()
                     created = result[0] if isinstance(result, list) else result
-
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Successfully created category!\n\nCategory ID: {created['id']}\nSlug: {created['slug']}\nName: {created['name']}\n\nUse this category_id when creating posts: {created['id']}"
-                        }]
-                    }
+                    return {"content": [{"type": "text", "text": f"Created category: {created['id']} ({created['slug']})"}]}
                 else:
                     error = await resp.text()
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Failed to create category (HTTP {resp.status}): {error}"
-                        }],
-                        "is_error": True
-                    }
+                    return {"content": [{"type": "text", "text": f"Error: {error}"}], "is_error": True}
 
     except Exception as e:
-        return {
-            "content": [{
-                "type": "text",
-                "text": f"Error creating category: {str(e)}"
-            }],
-            "is_error": True
-        }
+        return {"content": [{"type": "text", "text": f"Error: {str(e)}"}], "is_error": True}
 
 
 async def create_tag(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Create a new blog tag.
-
-    Only create a new tag if it doesn't already exist - check existing tags first.
-
-    Args:
-        slug: URL-friendly identifier (lowercase, hyphens)
-        name: Display name
-
-    Returns:
-        The created tag with its ID
-    """
+    """Create a new blog tag. Check existing tags first to avoid duplicates."""
     try:
-        tag_data = {
-            "slug": args["slug"],
-            "name": args["name"],
-        }
+        tag_data = {"slug": args["slug"], "name": args["name"]}
 
         async with aiohttp.ClientSession() as session:
             headers = get_supabase_headers()
-
             async with session.post(
                 f"{SUPABASE_URL}/rest/v1/blog_tags",
                 headers=headers,
@@ -204,245 +130,116 @@ async def create_tag(args: dict[str, Any]) -> dict[str, Any]:
                 if resp.status in [200, 201]:
                     result = await resp.json()
                     created = result[0] if isinstance(result, list) else result
-
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Successfully created tag!\n\nTag ID: {created['id']}\nSlug: {created['slug']}\nName: {created['name']}\n\nUse this tag_id when linking to posts: {created['id']}"
-                        }]
-                    }
+                    return {"content": [{"type": "text", "text": f"Created tag: {created['id']} ({created['slug']})"}]}
                 else:
                     error = await resp.text()
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Failed to create tag (HTTP {resp.status}): {error}"
-                        }],
-                        "is_error": True
-                    }
+                    return {"content": [{"type": "text", "text": f"Error: {error}"}], "is_error": True}
 
     except Exception as e:
-        return {
-            "content": [{
-                "type": "text",
-                "text": f"Error creating tag: {str(e)}"
-            }],
-            "is_error": True
-        }
+        return {"content": [{"type": "text", "text": f"Error: {str(e)}"}], "is_error": True}
 
 
 async def link_tags_to_post(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Link tags to a blog post via the junction table.
-
-    Call this AFTER creating the post to associate tags with it.
-
-    Args:
-        post_id: UUID of the blog post
-        tag_ids: Array of tag UUIDs to link
-
-    Returns:
-        Confirmation of linked tags
-    """
+    """Link tags to an existing post. Prefer passing tag_ids to create_blog_post instead."""
     try:
         post_id = args["post_id"]
         tag_ids = args["tag_ids"]
 
         if not tag_ids:
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": "No tags provided to link."
-                }]
-            }
+            return {"content": [{"type": "text", "text": "No tags provided"}]}
 
-        # Build insert data for junction table
         links = [{"post_id": post_id, "tag_id": tag_id} for tag_id in tag_ids]
 
         async with aiohttp.ClientSession() as session:
             headers = get_supabase_headers()
-
             async with session.post(
                 f"{SUPABASE_URL}/rest/v1/blog_post_tags",
                 headers=headers,
                 json=links
             ) as resp:
                 if resp.status in [200, 201]:
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Successfully linked {len(tag_ids)} tag(s) to post {post_id}"
-                        }]
-                    }
+                    return {"content": [{"type": "text", "text": f"Linked {len(tag_ids)} tags"}]}
                 else:
                     error = await resp.text()
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Failed to link tags (HTTP {resp.status}): {error}"
-                        }],
-                        "is_error": True
-                    }
+                    return {"content": [{"type": "text", "text": f"Error: {error}"}], "is_error": True}
 
     except Exception as e:
-        return {
-            "content": [{
-                "type": "text",
-                "text": f"Error linking tags: {str(e)}"
-            }],
-            "is_error": True
-        }
+        return {"content": [{"type": "text", "text": f"Error: {str(e)}"}], "is_error": True}
 
 
 async def update_post_status(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Update the status of a blog post.
-
-    Args:
-        post_id: UUID of the post
-        status: New status ('draft', 'published', 'archived')
-
-    Returns:
-        Confirmation of the update
-    """
+    """Update post status (draft/published/archived)."""
     try:
         post_id = args["post_id"]
         status = args["status"]
 
-        if status not in ["draft", "published", "archived"]:
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": f"Invalid status '{status}'. Must be 'draft', 'published', or 'archived'."
-                }],
-                "is_error": True
-            }
+        if status not in ["draft", "published", "scheduled", "archived"]:
+            return {"content": [{"type": "text", "text": f"Invalid status: {status}"}], "is_error": True}
 
         async with aiohttp.ClientSession() as session:
             headers = get_supabase_headers()
-
             async with session.patch(
                 f"{SUPABASE_URL}/rest/v1/blog_posts?id=eq.{post_id}",
                 headers=headers,
-                json={"status": status, "updated_at": "now()"}
+                json={"status": status}
             ) as resp:
                 if resp.status in [200, 204]:
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Successfully updated post {post_id} status to '{status}'"
-                        }]
-                    }
+                    return {"content": [{"type": "text", "text": f"Updated: {post_id} → {status}"}]}
                 else:
                     error = await resp.text()
-                    return {
-                        "content": [{
-                            "type": "text",
-                            "text": f"Failed to update status (HTTP {resp.status}): {error}"
-                        }],
-                        "is_error": True
-                    }
+                    return {"content": [{"type": "text", "text": f"Error: {error}"}], "is_error": True}
 
     except Exception as e:
-        return {
-            "content": [{
-                "type": "text",
-                "text": f"Error updating status: {str(e)}"
-            }],
-            "is_error": True
-        }
+        return {"content": [{"type": "text", "text": f"Error: {str(e)}"}], "is_error": True}
+
+
+async def update_post_image(post_id: str, image_url: str, alt_text: str = None) -> bool:
+    """Update a post's featured image (for backfill). Returns True on success."""
+    try:
+        update_data = {"featured_image": image_url}
+        if alt_text:
+            update_data["featured_image_alt"] = alt_text
+
+        async with aiohttp.ClientSession() as session:
+            headers = get_supabase_headers()
+            async with session.patch(
+                f"{SUPABASE_URL}/rest/v1/blog_posts?id=eq.{post_id}",
+                headers=headers,
+                json=update_data
+            ) as resp:
+                return resp.status in [200, 204]
+    except Exception:
+        return False
 
 
 # Tool definitions for Claude Agent SDK
 WRITE_TOOLS = [
     {
         "name": "create_blog_post",
-        "description": """Create a new blog post in Supabase.
-
-IMPORTANT: Before calling this tool:
-1. Call get_blog_context to know existing categories, tags, and authors
-2. Check the slug doesn't exist with check_slug_exists
-3. Get author_id from the context (use existing author)
-4. Get category_id from context (use existing category when appropriate)
-
-Content must be an array of content blocks with this structure:
-[
-  {"id": "unique-id", "type": "paragraph", "data": {"text": "..."}},
-  {"id": "unique-id", "type": "heading", "data": {"level": 2, "text": "..."}},
-  ...
-]
-
-Supported block types: paragraph, heading, quote, list, checklist, proscons, image,
-gallery, video, embed, table, stats, accordion, button, tableOfContents, code, callout, divider
-
-After creating the post, use link_tags_to_post to add tags.""",
+        "description": "Create a blog post. Content is array of blocks [{id, type, data}]. Pass tag_ids to link tags in same call.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "slug": {
-                    "type": "string",
-                    "description": "URL-friendly slug (lowercase, hyphens, no spaces). Example: 'how-to-fix-your-slice'"
-                },
-                "title": {
-                    "type": "string",
-                    "description": "Post title. Example: 'How to Fix Your Slice: A Complete Guide'"
-                },
-                "excerpt": {
-                    "type": "string",
-                    "description": "Short description (2-3 sentences) for previews and SEO"
-                },
+                "slug": {"type": "string", "description": "URL slug (lowercase, hyphens)"},
+                "title": {"type": "string", "description": "Post title"},
+                "excerpt": {"type": "string", "description": "Short description (2-3 sentences)"},
                 "content": {
                     "type": "array",
-                    "description": "Array of content blocks. Each block has id, type, and data properties.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "string"},
-                            "type": {"type": "string"},
-                            "data": {"type": "object"}
-                        },
-                        "required": ["id", "type", "data"]
-                    }
+                    "description": "Array of content blocks",
+                    "items": {"type": "object", "required": ["id", "type", "data"]}
                 },
-                "author_id": {
-                    "type": "string",
-                    "description": "UUID of the author (get from get_blog_context)"
+                "author_id": {"type": "string", "description": "Author UUID from get_blog_context"},
+                "category_id": {"type": "string", "description": "Category UUID (optional)"},
+                "tag_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tag UUIDs to link (optional, saves a tool call)"
                 },
-                "category_id": {
-                    "type": "string",
-                    "description": "UUID of the category (optional, get from get_blog_context)"
-                },
-                "featured_image": {
-                    "type": "string",
-                    "description": "URL to featured image (optional)"
-                },
-                "featured_image_alt": {
-                    "type": "string",
-                    "description": "Alt text for featured image (required if featured_image provided)"
-                },
-                "reading_time": {
-                    "type": "integer",
-                    "description": "Estimated minutes to read (auto-calculated if not provided)"
-                },
-                "featured": {
-                    "type": "boolean",
-                    "description": "Whether to feature this post on homepage (default: false)"
-                },
-                "seo": {
-                    "type": "object",
-                    "description": "SEO metadata: {title, description, keywords[], image}",
-                    "properties": {
-                        "title": {"type": "string"},
-                        "description": {"type": "string"},
-                        "keywords": {"type": "array", "items": {"type": "string"}},
-                        "image": {"type": "string"}
-                    }
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["draft", "published", "archived"],
-                    "description": "Post status (default: 'draft' for review before publishing)"
-                }
+                "featured_image": {"type": "string", "description": "Image URL (optional)"},
+                "featured_image_alt": {"type": "string", "description": "Image alt text"},
+                "seo": {"type": "object", "description": "{title, description, keywords[]}"},
+                "status": {"type": "string", "enum": ["draft", "published", "scheduled", "archived"]},
+                "scheduled_at": {"type": "string", "description": "ISO timestamp for scheduled publish (required if status=scheduled)"}
             },
             "required": ["slug", "title", "excerpt", "content", "author_id"]
         },
@@ -450,36 +247,13 @@ After creating the post, use link_tags_to_post to add tags.""",
     },
     {
         "name": "create_category",
-        "description": """Create a new blog category.
-
-IMPORTANT: Only create a new category if absolutely necessary!
-First check get_blog_context to see existing categories. Most posts should use existing categories.
-
-Common categories for golf blogs: Instruction, Equipment, Course Reviews, Tips & Tricks, Mental Game, etc.""",
+        "description": "Create new category. Use existing categories when possible.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "slug": {
-                    "type": "string",
-                    "description": "URL-friendly slug (lowercase, hyphens)"
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Display name for the category"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Short description of what posts belong in this category"
-                },
-                "seo": {
-                    "type": "object",
-                    "description": "SEO metadata for category page",
-                    "properties": {
-                        "title": {"type": "string"},
-                        "description": {"type": "string"},
-                        "keywords": {"type": "array", "items": {"type": "string"}}
-                    }
-                }
+                "slug": {"type": "string", "description": "URL slug"},
+                "name": {"type": "string", "description": "Display name"},
+                "description": {"type": "string", "description": "Category description"}
             },
             "required": ["slug", "name"]
         },
@@ -487,21 +261,12 @@ Common categories for golf blogs: Instruction, Equipment, Course Reviews, Tips &
     },
     {
         "name": "create_tag",
-        "description": """Create a new blog tag.
-
-IMPORTANT: Check existing tags from get_blog_context first to avoid duplicates!
-Tags are for specific topics within a post. Reuse existing tags when possible.""",
+        "description": "Create new tag. Check existing tags first to avoid duplicates.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "slug": {
-                    "type": "string",
-                    "description": "URL-friendly slug (lowercase, hyphens). Example: 'swing-mechanics'"
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Display name. Example: 'Swing Mechanics'"
-                }
+                "slug": {"type": "string", "description": "URL slug"},
+                "name": {"type": "string", "description": "Display name"}
             },
             "required": ["slug", "name"]
         },
@@ -509,24 +274,12 @@ Tags are for specific topics within a post. Reuse existing tags when possible.""
     },
     {
         "name": "link_tags_to_post",
-        "description": """Link tags to a blog post.
-
-Call this AFTER creating the post. Gets the post_id from create_blog_post result.
-Gets tag_ids from get_blog_context or create_tag results.
-
-A post should typically have 3-7 relevant tags.""",
+        "description": "Link tags to existing post. Prefer passing tag_ids to create_blog_post.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "post_id": {
-                    "type": "string",
-                    "description": "UUID of the blog post (from create_blog_post result)"
-                },
-                "tag_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Array of tag UUIDs to link to the post"
-                }
+                "post_id": {"type": "string", "description": "Post UUID"},
+                "tag_ids": {"type": "array", "items": {"type": "string"}, "description": "Tag UUIDs"}
             },
             "required": ["post_id", "tag_ids"]
         },
@@ -534,26 +287,12 @@ A post should typically have 3-7 relevant tags.""",
     },
     {
         "name": "update_post_status",
-        "description": """Update the status of a blog post.
-
-Use this to publish a draft or archive old content.
-
-Statuses:
-- draft: Not visible on site, for review
-- published: Live and visible
-- archived: Hidden but preserved""",
+        "description": "Update post status (draft/published/scheduled/archived).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "post_id": {
-                    "type": "string",
-                    "description": "UUID of the post to update"
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["draft", "published", "archived"],
-                    "description": "New status for the post"
-                }
+                "post_id": {"type": "string", "description": "Post UUID"},
+                "status": {"type": "string", "enum": ["draft", "published", "scheduled", "archived"]}
             },
             "required": ["post_id", "status"]
         },

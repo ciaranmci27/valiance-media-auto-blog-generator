@@ -20,18 +20,26 @@ When given a specific topic:
 1. Call `get_blog_context` to see existing categories, tags, authors
 2. Plan content structure
 3. Check slug uniqueness with `check_slug_exists`
-4. Create the post with `create_blog_post`
-5. Link tags with `link_tags_to_post`
+4. Create the post with `create_blog_post` (pass `tag_ids` to link tags in same call)
 
 ### Autonomous Mode (working from queue)
 When processing the idea queue:
-1. Call `get_next_blog_idea` to get the next pending idea
-2. Call `claim_blog_idea` with the idea_id to lock it
-3. Call `get_blog_context` to understand existing content
-4. Write the blog post based on the idea's topic/description/notes
-5. Create the post with `create_blog_post`
-6. Link tags with `link_tags_to_post`
+1. Call `get_and_claim_blog_idea` to get and claim the next pending idea (atomic operation)
+2. Call `get_blog_context` to understand existing categories, tags, and authors
+3. **DECIDE on category and slug NOW** (before image generation):
+   - Review the ACTUAL categories from `get_blog_context`
+   - If idea has `target_category_slug` AND it exists in actual categories, use it
+   - Otherwise, choose the most appropriate existing category
+   - Determine the post slug based on the topic keyword
+4. If image generation is available, call `generate_featured_image` using:
+   - `category_slug`: The category you decided in step 3
+   - `post_slug`: The slug you decided in step 3
+5. Write the blog post content based on the idea's topic/description/notes
+6. Create the post with `create_blog_post` using the SAME category and slug from step 3
+   - Pass `tag_ids` directly to link tags in the same call
 7. Call `complete_blog_idea` with idea_id and blog_post_id
+
+**IMPORTANT**: The category used for the image MUST match the category used for the post. Decide once, use consistently.
 
 If anything fails, call `fail_blog_idea` with the error message.
 If the idea should be skipped (duplicate topic, etc.), call `skip_blog_idea` with reason.
@@ -48,6 +56,91 @@ The `topic` field from blog ideas contains the **exact keyword phrase** we want 
 4. **Use the topic naturally in content** - The topic keyword should appear naturally in the introduction, at least one h2 heading, and throughout the article body
 
 DO NOT rephrase or "improve" the topic keyword. If the topic is "how to fix a slice in golf", use THAT phrase, not a synonym like "correcting your curved shots".
+
+### Category Selection (IMPORTANT)
+When selecting a category for a blog post, follow this priority:
+
+1. **Use existing categories from `get_blog_context`** - This is the 98% case
+   - Review the categories returned by `get_blog_context`
+   - Pick the one that best fits the topic
+   - If the idea has `target_category_slug`, check if it exists in actual categories and use it if it does
+
+2. **Use fallback category if nothing fits** - Rather than creating a new category
+   - Use the configured default category (usually "general" or similar)
+   - This keeps the site structure clean
+
+3. **Create new category ONLY if explicitly allowed** - Rare case
+   - Only if `ALLOW_NEW_CATEGORIES=true` in config
+   - Even then, strongly prefer existing categories
+   - New categories should be clearly distinct from existing ones
+
+**Why this matters:**
+- Consistent categories improve site navigation and SEO
+- Too many categories fragments content and confuses users
+- Existing categories are pre-configured with proper SEO metadata
+
+**Example decision process:**
+Topic: "Best golf shoes for wet conditions"
+Existing categories: ["golf-tips", "equipment-reviews", "fitness", "course-guides"]
+
+Thinking: "This is reviewing golf equipment, so 'equipment-reviews' is the best fit."
+Decision: Use "equipment-reviews"
+
+### Featured Image Generation (When Enabled)
+If the `generate_featured_image` tool is available, generate a featured image for every blog post.
+
+**CRITICAL: Decide Category First!**
+You MUST decide on the category BEFORE generating the image. The image folder must match the post's actual category.
+
+**Workflow with Images:**
+1. Call `generate_featured_image` with:
+   - `prompt`: A detailed image description for realistic photography
+   - `category_slug`: The ACTUAL category slug you will use for the post
+   - `post_slug`: The ACTUAL slug you will use for the post
+2. The image will be stored at: `blog-images/{category_slug}/{post_slug}.webp`
+3. Folders are created automatically - no need to pre-create them
+4. Use the returned URL as the `featured_image` parameter in `create_blog_post`
+5. Generate an appropriate `featured_image_alt` description
+
+If image generation is disabled, the tool returns an error - just skip image and continue.
+
+**Image Organization:**
+Images are stored in folders by category (folders created automatically on upload):
+```
+blog-images/
+  golf-tips/
+    best-golf-drivers-2025.webp
+    how-to-fix-a-slice.webp
+  equipment-reviews/
+    titleist-tsi3-review.webp
+  fitness/
+    golf-exercises-for-seniors.webp
+```
+
+**Crafting Effective Image Prompts:**
+Your image prompts should create realistic, professional photography. Focus on:
+
+1. **Scene Description** - Describe a specific, concrete scene (not abstract concepts)
+2. **Setting & Environment** - Where is this taking place? Indoors/outdoors? Time of day?
+3. **Lighting** - Golden hour, soft natural light, dramatic shadows, etc.
+4. **Composition** - What's the main subject? What's in the background?
+5. **Mood & Atmosphere** - Peaceful, energetic, professional, casual?
+
+**Example Image Prompts:**
+- Topic "best golf drivers 2025":
+  "A premium golf driver club head resting on a tee at dawn, dew drops on the grass, soft golden morning light, shallow depth of field with a blurred fairway in background"
+
+- Topic "how to fix a slice in golf":
+  "Golfer mid-backswing on a pristine fairway, perfect form, bright sunny day, mountains visible in the distance, professional sports photography style"
+
+- Topic "golf exercises for seniors":
+  "Active senior couple stretching on a golf course at sunrise, warm golden light, green fairway behind them, healthy lifestyle imagery"
+
+**Avoid in Prompts:**
+- Text, logos, or words (AI struggles with these)
+- Multiple complex subjects
+- Abstract concepts that don't translate to images
+- Brand names or specific products
 
 ---
 
@@ -451,8 +544,7 @@ Every post should include:
 ### Tags
 - Use 3-7 tags per post
 - Check existing tags first - reuse when possible
-- Tags are linked via junction table AFTER post creation
-- Use `link_tags_to_post` with post_id and array of tag_ids
+- Pass `tag_ids` array directly to `create_blog_post` to link in one call
 
 ---
 
@@ -599,7 +691,6 @@ Every post should include:
 2. **Unique IDs** - Every block needs a unique id string
 3. **Valid JSON** - Content must be a valid JSON array
 4. **Get context first** - Always call `get_blog_context` before writing
-5. **Check slugs** - Verify uniqueness with `check_slug_exists`
-6. **Link tags after** - Tags are linked via `link_tags_to_post` AFTER post creation
-7. **Default to draft** - Create as 'draft' for human review
-8. **Complete the workflow** - In autonomous mode, always call `complete_blog_idea` or `fail_blog_idea`
+5. **Pass tag_ids** - Include tag_ids in `create_blog_post` call to link in one step
+6. **Default to draft** - Create as 'draft' for human review
+7. **Complete the workflow** - In autonomous mode, always call `complete_blog_idea` or `fail_blog_idea`

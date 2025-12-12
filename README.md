@@ -19,10 +19,12 @@ This project serves as a **reference implementation** and starting point. Fork i
 
 - **Content Block System**: Generates posts as structured JSON blocks (customizable block types)
 - **Autonomous Mode**: Process blog ideas from a queue without manual intervention
+- **AI Image Generation**: Optional featured images via Gemini (graceful fallback if unavailable)
 - **Context Awareness**: Reads existing categories, tags, and authors to maintain consistency
 - **SEO Optimized**: Generates titles, excerpts, slugs, and keyword metadata
-- **Draft by Default**: Posts created as drafts for human review before publishing
-- **Queue Management**: Priority-based processing with status tracking
+- **Scheduled Posts**: Support for scheduling posts to publish at a future date
+- **Queue Management**: Priority-based processing with automatic idea release on failure
+- **Cost Optimized**: Prompt caching reduces token usage by ~50%
 
 ## How It Works
 
@@ -203,10 +205,12 @@ Generate content using these block types only:
 Process ideas from the queue:
 
 ```bash
-python generator.py --autonomous              # Process one idea
-python generator.py --autonomous --count 5    # Process up to 5
+python generator.py --autonomous              # Process BLOGS_PER_RUN ideas (default: 1)
+python generator.py --autonomous --count 5    # Override to process 5
 python generator.py --status                  # Check queue status
 ```
+
+Set `BLOGS_PER_RUN=3` in your `.env` to always generate 3 posts per run.
 
 ### Manual Mode
 
@@ -230,6 +234,18 @@ python generator.py --batch topics.txt
 ```bash
 python generator.py --interactive
 ```
+
+### Backfill Images Mode
+
+Generate images for existing posts that don't have them (e.g., after quota errors):
+
+```bash
+python generator.py --backfill-images              # Process 1 post
+python generator.py --backfill-images --count 10   # Process up to 10 posts
+python generator.py --backfill-images --verbose    # With detailed output
+```
+
+This mode does **not** create new posts or use Claude — it only generates images via Gemini and updates existing posts.
 
 ## Database Setup
 
@@ -291,11 +307,14 @@ WHERE id = 'uuid-here';
 │   ├── __init__.py
 │   ├── query_tools.py        # Read from Supabase (customize for your schema)
 │   ├── write_tools.py        # Write to Supabase (customize for your schema)
-│   └── idea_tools.py         # Queue management
+│   ├── idea_tools.py         # Queue management
+│   └── image_tools.py        # AI image generation (Gemini)
 ├── prompts/
 │   └── system_prompt.md      # Claude instructions (customize block types here)
 └── schema/
-    └── blog_ideas.sql        # Queue table schema
+    ├── blog_tables.sql       # Blog posts, categories, tags, authors
+    ├── blog_ideas.sql        # Queue table schema
+    └── storage_bucket.sql    # Supabase storage policies for images
 ```
 
 ## Automation
@@ -308,32 +327,14 @@ WHERE id = 'uuid-here';
 
 ### GitHub Actions
 
-```yaml
-name: Generate Blog Posts
+See `.github/workflows/generate-blogs.yml` for a complete example. Key secrets to configure:
 
-on:
-  schedule:
-    - cron: '0 9 * * 1'  # Every Monday at 9am UTC
-  workflow_dispatch:
+- `ANTHROPIC_API_KEY` - Your Claude API key
+- `SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_SERVICE_KEY` - Supabase service role key
+- `GEMINI_API_KEY` - (Optional) For image generation
 
-jobs:
-  generate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Process blog queue
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          DEFAULT_AUTHOR_SLUG: your-author-slug
-        run: python generator.py --autonomous --count 3 --verbose
-```
+Set `BLOGS_PER_RUN` in your `.env` or workflow to control how many posts are generated per run.
 
 ## Configuration
 
@@ -343,16 +344,37 @@ jobs:
 | `SUPABASE_URL` | Yes | - | Your Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Yes | - | Supabase service role key |
 | `DEFAULT_AUTHOR_SLUG` | Yes | - | Author slug for generated posts |
-| `CLAUDE_MODEL` | No | `claude-sonnet-4-20250514` | Claude model to use |
+| `CLAUDE_MODEL` | No | `claude-sonnet-4-5-20250929` | Claude model to use |
 | `MAX_TURNS` | No | `15` | Max agentic loop iterations |
 | `DEFAULT_STATUS` | No | `draft` | Default post status |
+| `BLOGS_PER_RUN` | No | `1` | Number of blogs to generate per autonomous run |
+
+### Image Generation (Optional)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ENABLE_IMAGE_GENERATION` | No | `false` | Enable AI image generation |
+| `GEMINI_API_KEY` | If enabled | - | Google AI API key |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash-image` | Gemini model for images |
+| `IMAGE_CONTEXT` | No | - | Site theme (e.g., "golf course, outdoor, sunny") |
+| `IMAGE_ASPECT_RATIO` | No | `21:9` | Image aspect ratio |
+| `IMAGE_WIDTH` | No | `1600` | Image width in pixels |
+| `IMAGE_QUALITY` | No | `85` | WebP quality (1-100) |
+| `SUPABASE_STORAGE_BUCKET` | No | `blog-images` | Storage bucket name |
+
+**Tip:** Set `IMAGE_CONTEXT` to match your site's theme for more relevant images. For example:
+- Golf blog: `IMAGE_CONTEXT=golf course, outdoor sports, sunny day, green grass`
+- Tech blog: `IMAGE_CONTEXT=modern office, technology, clean workspace`
+- Food blog: `IMAGE_CONTEXT=kitchen, food photography, warm lighting`
 
 ## Cost Estimation
 
-Using Claude Sonnet:
-- ~20-50K tokens per blog post
-- ~$0.06-0.15 per post
-- 10 posts: ~$0.60-1.50
+Using Claude Sonnet 4.5 with prompt caching enabled:
+- ~70K tokens per blog post
+- ~$0.15-0.25 per post
+- 10 posts: ~$1.50-2.50
+
+*Prompt caching reduces costs by ~50% after the first turn.*
 
 ## Troubleshooting
 
@@ -372,6 +394,13 @@ Reset stuck ideas:
 ```sql
 UPDATE blog_ideas SET status = 'pending' WHERE status = 'in_progress';
 ```
+
+### Image generation returns "SKIPPED"
+- Check your `GEMINI_API_KEY` is valid
+- Verify the model name matches Google's API (e.g., `gemini-2.5-flash-image`)
+- Check your Gemini quota at [Google AI Studio](https://aistudio.google.com/)
+- Blog posts will still be created without images (graceful fallback)
+- Run `python generator.py --backfill-images` later to generate missing images
 
 ## Contributing
 

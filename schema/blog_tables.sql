@@ -167,11 +167,12 @@ CREATE TABLE IF NOT EXISTS public.blog_posts (
   -- Timestamps
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  scheduled_at timestamp with time zone,        -- When to auto-publish (for scheduled posts)
 
   -- Constraints
   CONSTRAINT blog_posts_pkey PRIMARY KEY (id),
   CONSTRAINT blog_posts_slug_key UNIQUE (slug),
-  CONSTRAINT blog_posts_status_check CHECK (status = ANY (ARRAY['draft', 'published', 'archived'])),
+  CONSTRAINT blog_posts_status_check CHECK (status = ANY (ARRAY['draft', 'published', 'scheduled', 'archived'])),
   CONSTRAINT blog_posts_author_id_fkey FOREIGN KEY (author_id)
     REFERENCES public.blog_authors(id) ON DELETE SET NULL,
   CONSTRAINT blog_posts_category_id_fkey FOREIGN KEY (category_id)
@@ -190,6 +191,11 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON public.blog_posts(created_a
 CREATE INDEX IF NOT EXISTS idx_blog_posts_published_date
   ON public.blog_posts(status, created_at DESC)
   WHERE status = 'published';
+
+-- Index for scheduled posts (to find posts ready to publish)
+CREATE INDEX IF NOT EXISTS idx_blog_posts_scheduled
+  ON public.blog_posts(scheduled_at)
+  WHERE status = 'scheduled' AND scheduled_at IS NOT NULL;
 
 -- GIN index for content block searching (optional, for full-text search)
 CREATE INDEX IF NOT EXISTS idx_blog_posts_content_gin

@@ -48,6 +48,18 @@ jobs:
           DEFAULT_STATUS: ${{ vars.DEFAULT_STATUS }}
           CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
           MAX_TURNS: ${{ vars.MAX_TURNS }}
+          # Category settings
+          ALLOW_NEW_CATEGORIES: ${{ vars.ALLOW_NEW_CATEGORIES }}
+          DEFAULT_CATEGORY_SLUG: ${{ vars.DEFAULT_CATEGORY_SLUG }}
+          # Image generation settings
+          ENABLE_IMAGE_GENERATION: ${{ vars.ENABLE_IMAGE_GENERATION }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          IMAGE_ASPECT_RATIO: ${{ vars.IMAGE_ASPECT_RATIO }}
+          IMAGE_RESOLUTION: ${{ vars.IMAGE_RESOLUTION }}
+          IMAGE_QUALITY: ${{ vars.IMAGE_QUALITY }}
+          IMAGE_WIDTH: ${{ vars.IMAGE_WIDTH }}
+          SUPABASE_STORAGE_BUCKET: ${{ vars.SUPABASE_STORAGE_BUCKET }}
         run: |
           python generator.py --status
 
@@ -60,6 +72,18 @@ jobs:
           DEFAULT_STATUS: ${{ vars.DEFAULT_STATUS }}
           CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
           MAX_TURNS: ${{ vars.MAX_TURNS }}
+          # Category settings
+          ALLOW_NEW_CATEGORIES: ${{ vars.ALLOW_NEW_CATEGORIES }}
+          DEFAULT_CATEGORY_SLUG: ${{ vars.DEFAULT_CATEGORY_SLUG }}
+          # Image generation settings
+          ENABLE_IMAGE_GENERATION: ${{ vars.ENABLE_IMAGE_GENERATION }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          IMAGE_ASPECT_RATIO: ${{ vars.IMAGE_ASPECT_RATIO }}
+          IMAGE_RESOLUTION: ${{ vars.IMAGE_RESOLUTION }}
+          IMAGE_QUALITY: ${{ vars.IMAGE_QUALITY }}
+          IMAGE_WIDTH: ${{ vars.IMAGE_WIDTH }}
+          SUPABASE_STORAGE_BUCKET: ${{ vars.SUPABASE_STORAGE_BUCKET }}
         run: |
           # Use input count if manual trigger, otherwise default to 1
           COUNT="${{ github.event.inputs.count || '1' }}"
