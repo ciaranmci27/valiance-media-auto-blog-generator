@@ -10,10 +10,11 @@ Before using this generator, you will need to:
 
 1. **Set up your database schema** - Create `blog_posts`, `blog_categories`, `blog_tags`, and `blog_authors` tables in Supabase (see [Database Setup](#database-setup))
 2. **Adapt the content blocks** - Modify the block types in `prompts/system_prompt.md` to match your frontend's rendering capabilities
-3. **Update the write tools** - Adjust `tools/write_tools.py` to match your exact database schema
-4. **Build a frontend renderer** - Create components that render each content block type (React, Vue, vanilla JS, etc.)
+3. **Customize for your niche** - Edit the niche prompt file to add your domain expertise (see [Niche Customization](#niche-customization))
+4. **Update the write tools** - Adjust `tools/write_tools.py` to match your exact database schema
+5. **Build a frontend renderer** - Create components that render each content block type (React, Vue, vanilla JS, etc.)
 
-This project serves as a **reference implementation** and starting point. Fork it and make it your own.
+This project serves as a **reference implementation** and starting point. **It ships configured for golf content as a working example** — customize it for your niche.
 
 ## Features
 
@@ -198,6 +199,70 @@ Generate content using these block types only:
 { "id": "string", "type": "list", "data": { "style": "ordered|unordered", "items": ["string"] } }
 ```
 
+## Niche Customization
+
+The generator uses a **modular prompt architecture** that separates universal blog instructions from niche-specific expertise.
+
+```
+prompts/
+├── system_prompt.md       # Universal: block types, SEO, workflows
+└── niche/
+    ├── golf.md            # Golf expertise (default, ships as working example)
+    └── _template.md       # Blank template for creating your own
+```
+
+### How It Works
+
+At runtime, the system loads:
+1. `system_prompt.md` - Universal instructions (content blocks, operating modes, SEO)
+2. `niche/{your-niche}.md` - Domain-specific expertise (merged automatically)
+
+When running with `--verbose`, you'll see:
+```
+✓ Niche prompt loaded: prompts/niche/golf.md
+```
+
+### Customizing for Your Niche
+
+1. **Copy the golf example:**
+   ```bash
+   cp prompts/niche/golf.md prompts/niche/cooking.md
+   ```
+
+2. **Edit with your domain expertise:**
+   - Voice & persona (how should the AI "sound"?)
+   - Terminology (correct terms for your field)
+   - Accuracy requirements (what facts matter?)
+   - E-E-A-T signals (how to demonstrate expertise)
+   - Image prompt examples (visual style for your niche)
+
+3. **Update your `.env`:**
+   ```env
+   NICHE_PROMPT_PATH=prompts/niche/cooking.md
+   IMAGE_CONTEXT=kitchen, food photography, warm lighting
+   ```
+
+### What Goes Where
+
+| Content | Location |
+|---------|----------|
+| Content block definitions | `system_prompt.md` (universal) |
+| Operating modes (manual, autonomous) | `system_prompt.md` (universal) |
+| SEO guidelines | `system_prompt.md` (universal) |
+| Block selection guide | `system_prompt.md` (universal) |
+| **Niche terminology** | `niche/{your-niche}.md` |
+| **Accuracy requirements** | `niche/{your-niche}.md` |
+| **Domain-specific examples** | `niche/{your-niche}.md` |
+| **Image prompt examples** | `niche/{your-niche}.md` |
+| **Quality checklist for niche** | `niche/{your-niche}.md` |
+
+### Running Without a Niche
+
+To generate generic content without niche-specific expertise:
+```env
+NICHE_PROMPT_PATH=
+```
+
 ## Usage Modes
 
 ### Autonomous Mode (Recommended)
@@ -310,7 +375,10 @@ WHERE id = 'uuid-here';
 │   ├── idea_tools.py         # Queue management
 │   └── image_tools.py        # AI image generation (Gemini)
 ├── prompts/
-│   └── system_prompt.md      # Claude instructions (customize block types here)
+│   ├── system_prompt.md      # Universal instructions (block types, workflows)
+│   └── niche/
+│       ├── golf.md           # Golf expertise (default, working example)
+│       └── _template.md      # Blank template for creating your own niche
 └── schema/
     ├── blog_tables.sql       # Blog posts, categories, tags, authors
     ├── blog_ideas.sql        # Queue table schema
@@ -348,6 +416,7 @@ Set `BLOGS_PER_RUN` in your `.env` or workflow to control how many posts are gen
 | `MAX_TURNS` | No | `15` | Max agentic loop iterations |
 | `DEFAULT_STATUS` | No | `draft` | Default post status |
 | `BLOGS_PER_RUN` | No | `1` | Number of blogs to generate per autonomous run |
+| `NICHE_PROMPT_PATH` | No | `prompts/niche/golf.md` | Path to niche-specific prompt file |
 
 ### Image Generation (Optional)
 

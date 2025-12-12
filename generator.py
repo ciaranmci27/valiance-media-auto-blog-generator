@@ -40,8 +40,12 @@ from config import (
     CLAUDE_MODEL,
     MAX_TURNS,
     DEFAULT_AUTHOR_SLUG,
+    DEFAULT_STATUS,
+    DEFAULT_CATEGORY_SLUG,
+    ALLOW_NEW_CATEGORIES,
     ENABLE_IMAGE_GENERATION,
     BLOGS_PER_RUN,
+    NICHE_PROMPT_PATH,
 )
 from tools.query_tools import QUERY_TOOLS
 from tools.write_tools import WRITE_TOOLS
@@ -91,11 +95,29 @@ async def health_check(verbose: bool = False) -> dict:
     return {"success": True, "errors": []}
 
 
-def load_system_prompt() -> str:
-    """Load the system prompt from file"""
+def load_system_prompt(verbose: bool = False) -> str:
+    """Load the system prompt from file, merging with niche prompt if configured"""
     prompt_path = Path(__file__).parent / "prompts" / "system_prompt.md"
     with open(prompt_path, "r", encoding="utf-8") as f:
-        return f.read()
+        base_prompt = f.read()
+
+    # Load niche-specific prompt if configured
+    niche_path = NICHE_PROMPT_PATH
+    if niche_path:
+        niche_full_path = Path(__file__).parent / niche_path
+        if niche_full_path.exists():
+            with open(niche_full_path, "r", encoding="utf-8") as f:
+                niche_prompt = f.read()
+            if verbose:
+                print(f"✓ Niche prompt loaded: {niche_path}")
+            # Merge: base prompt + separator + niche prompt
+            return f"{base_prompt}\n\n---\n\n{niche_prompt}"
+        else:
+            print(f"⚠ Warning: Niche prompt not found at {niche_full_path}")
+    elif verbose:
+        print("✗ No niche prompt configured (generic mode)")
+
+    return base_prompt
 
 
 def get_all_tools(include_idea_tools: bool = True, verbose: bool = False) -> list:
@@ -173,7 +195,7 @@ async def run_agent(
         return {"success": False, "error": "anthropic package not installed"}
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    system_prompt = load_system_prompt()
+    system_prompt = load_system_prompt(verbose=verbose)
 
     # Build tool definitions for API
     tools = []
@@ -327,8 +349,11 @@ Instructions:
 3. Check your chosen slug doesn't already exist with check_slug_exists
 4. Create a high-quality, SEO-optimized blog post using create_blog_post (pass tag_ids to link tags)
 
-The default author slug is: {DEFAULT_AUTHOR_SLUG}
-Posts should be created as 'draft' status for review.
+Configuration:
+- Default author slug: {DEFAULT_AUTHOR_SLUG}
+- Default post status: {DEFAULT_STATUS}
+- Default fallback category: {DEFAULT_CATEGORY_SLUG}
+- Can create new categories: {ALLOW_NEW_CATEGORIES}
 
 Begin by getting the blog context."""
 
@@ -367,8 +392,11 @@ Workflow:
 If anything fails, call fail_blog_idea with the error message.
 If the idea should be skipped (duplicate, inappropriate), call skip_blog_idea with reason.
 
-The default author slug is: {DEFAULT_AUTHOR_SLUG}
-Posts should be created as 'draft' status for review.
+Configuration:
+- Default author slug: {DEFAULT_AUTHOR_SLUG}
+- Default post status: {DEFAULT_STATUS}
+- Default fallback category: {DEFAULT_CATEGORY_SLUG}
+- Can create new categories: {ALLOW_NEW_CATEGORIES}
 
 Begin by getting the next blog idea."""
 
@@ -571,7 +599,7 @@ async def generate_batch(topics_file: str, verbose: bool = False) -> list:
 
 async def interactive_mode(verbose: bool = False) -> None:
     """Interactive mode for generating posts one at a time"""
-    print("ClutchCaddie Blog Generator - Interactive Mode")
+    print("Autonomous Blog Generator - Interactive Mode")
     print("Commands: 'quit', 'status', 'auto' (process one from queue)")
     print("-" * 50)
 

@@ -56,7 +56,6 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           IMAGE_ASPECT_RATIO: ${{ vars.IMAGE_ASPECT_RATIO }}
-          IMAGE_RESOLUTION: ${{ vars.IMAGE_RESOLUTION }}
           IMAGE_QUALITY: ${{ vars.IMAGE_QUALITY }}
           IMAGE_WIDTH: ${{ vars.IMAGE_WIDTH }}
           SUPABASE_STORAGE_BUCKET: ${{ vars.SUPABASE_STORAGE_BUCKET }}
@@ -80,7 +79,6 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           IMAGE_ASPECT_RATIO: ${{ vars.IMAGE_ASPECT_RATIO }}
-          IMAGE_RESOLUTION: ${{ vars.IMAGE_RESOLUTION }}
           IMAGE_QUALITY: ${{ vars.IMAGE_QUALITY }}
           IMAGE_WIDTH: ${{ vars.IMAGE_WIDTH }}
           SUPABASE_STORAGE_BUCKET: ${{ vars.SUPABASE_STORAGE_BUCKET }}

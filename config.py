@@ -1,5 +1,8 @@
 """
-Configuration for ClutchCaddie Blog Generator
+Configuration for Autonomous Blog Generator
+
+Environment variables and settings for the blog generation system.
+See .env.example for all available options.
 """
 import os
 from dotenv import load_dotenv
@@ -36,13 +39,21 @@ MAX_TURNS = int(os.getenv("MAX_TURNS", "15"))
 BLOGS_PER_RUN = int(os.getenv("BLOGS_PER_RUN", "1"))
 
 # ===========================================
+# Niche Prompt Configuration
+# ===========================================
+# Path to niche-specific prompt file (relative to project root)
+# This adds domain expertise, terminology, and quality standards
+# Default: "prompts/niche/golf.md" - change this for your niche
+# Set to empty string "" for generic content generation (no niche)
+NICHE_PROMPT_PATH = os.getenv("NICHE_PROMPT_PATH", "prompts/niche/golf.md")
+
+# ===========================================
 # Image Generation Configuration (Nano Banana / Gemini)
 # ===========================================
 ENABLE_IMAGE_GENERATION = os.getenv("ENABLE_IMAGE_GENERATION", "false").lower() == "true"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-image")
 IMAGE_ASPECT_RATIO = os.getenv("IMAGE_ASPECT_RATIO", "21:9")
-IMAGE_RESOLUTION = os.getenv("IMAGE_RESOLUTION", "2K")
 IMAGE_QUALITY = int(os.getenv("IMAGE_QUALITY", "85"))
 IMAGE_WIDTH = int(os.getenv("IMAGE_WIDTH", "1600"))
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "blog-images")
