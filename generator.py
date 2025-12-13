@@ -46,6 +46,7 @@ from config import (
     ENABLE_IMAGE_GENERATION,
     BLOGS_PER_RUN,
     NICHE_PROMPT_PATH,
+    ENABLE_SHOPIFY_SYNC,
 )
 from tools.query_tools import QUERY_TOOLS
 from tools.write_tools import WRITE_TOOLS
@@ -85,6 +86,18 @@ async def health_check(verbose: bool = False) -> dict:
             errors.append("GEMINI_API_KEY not set but ENABLE_IMAGE_GENERATION=true")
         elif verbose:
             print("✓ Gemini API key configured")
+
+    # Check Shopify config (if sync enabled)
+    if ENABLE_SHOPIFY_SYNC:
+        from config import SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET
+        if not SHOPIFY_STORE:
+            errors.append("SHOPIFY_STORE not set but ENABLE_SHOPIFY_SYNC=true")
+        elif not SHOPIFY_CLIENT_ID:
+            errors.append("SHOPIFY_CLIENT_ID not set but ENABLE_SHOPIFY_SYNC=true")
+        elif not SHOPIFY_CLIENT_SECRET:
+            errors.append("SHOPIFY_CLIENT_SECRET not set but ENABLE_SHOPIFY_SYNC=true")
+        elif verbose:
+            print("✓ Shopify credentials configured")
 
     if errors:
         return {"success": False, "errors": errors}
@@ -709,6 +722,58 @@ Examples:
         help="Print detailed progress"
     )
 
+    # Shopify sync arguments
+    shopify_group = parser.add_argument_group('Shopify Sync')
+    shopify_group.add_argument(
+        "--shopify-sync",
+        type=str,
+        metavar="SLUG",
+        help="Sync a specific post to Shopify by slug"
+    )
+    shopify_group.add_argument(
+        "--shopify-sync-id",
+        type=str,
+        metavar="UUID",
+        help="Sync a specific post to Shopify by ID"
+    )
+    shopify_group.add_argument(
+        "--shopify-sync-all",
+        action="store_true",
+        help="Sync all posts that need syncing to Shopify"
+    )
+    shopify_group.add_argument(
+        "--shopify-sync-recent",
+        type=int,
+        metavar="N",
+        help="Sync the N most recently updated posts to Shopify"
+    )
+    shopify_group.add_argument(
+        "--shopify-sync-categories",
+        action="store_true",
+        help="Sync all categories to Shopify Blogs"
+    )
+    shopify_group.add_argument(
+        "--shopify-sync-category",
+        type=str,
+        metavar="SLUG",
+        help="Sync a specific category to Shopify by slug"
+    )
+    shopify_group.add_argument(
+        "--shopify-status",
+        action="store_true",
+        help="Show Shopify sync status of all posts"
+    )
+    shopify_group.add_argument(
+        "--shopify-status-categories",
+        action="store_true",
+        help="Show Shopify sync status of all categories"
+    )
+    shopify_group.add_argument(
+        "--force",
+        action="store_true",
+        help="Force sync even if already up-to-date (use with --shopify-sync commands)"
+    )
+
     args = parser.parse_args()
 
     # Validate configuration
@@ -719,7 +784,8 @@ Examples:
         sys.exit(1)
 
     # Health check (skip for status-only commands)
-    if not args.status:
+    skip_health_check = args.status or args.shopify_status or args.shopify_status_categories
+    if not skip_health_check:
         health = asyncio.run(health_check(verbose=args.verbose))
         if not health["success"]:
             print("Health check failed:")
@@ -730,6 +796,69 @@ Examples:
     # Run appropriate mode
     if args.status:
         asyncio.run(get_queue_status())
+
+    # Shopify sync commands
+    elif args.shopify_sync_categories:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_all_categories
+        result = asyncio.run(sync_all_categories(force=args.force))
+        print(f"\nSynced: {result['synced']} | Failed: {result['failed']} | Skipped: {result['skipped']}")
+
+    elif args.shopify_sync_category:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_category_by_slug
+        success = asyncio.run(sync_category_by_slug(args.shopify_sync_category, force=args.force))
+        sys.exit(0 if success else 1)
+
+    elif args.shopify_sync:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_post_by_slug
+        success = asyncio.run(sync_post_by_slug(args.shopify_sync, force=args.force))
+        sys.exit(0 if success else 1)
+
+    elif args.shopify_sync_id:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_post_by_id
+        success = asyncio.run(sync_post_by_id(args.shopify_sync_id, force=args.force))
+        sys.exit(0 if success else 1)
+
+    elif args.shopify_sync_all:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_all_posts
+        result = asyncio.run(sync_all_posts(force=args.force))
+        print(f"\nSynced: {result['synced']} | Failed: {result['failed']} | Skipped: {result['skipped']}")
+
+    elif args.shopify_sync_recent:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_recent
+        result = asyncio.run(sync_recent(args.shopify_sync_recent, force=args.force))
+        print(f"\nSynced: {result['synced']} | Failed: {result['failed']} | Skipped: {result['skipped']}")
+
+    elif args.shopify_status:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import show_sync_status
+        asyncio.run(show_sync_status())
+
+    elif args.shopify_status_categories:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import show_category_sync_status
+        asyncio.run(show_category_sync_status())
 
     elif args.autonomous:
         print(f"Autonomous Mode: Processing up to {args.count} idea(s) from queue")

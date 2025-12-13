@@ -71,6 +71,29 @@ IMAGE_STYLE_PREFIX = os.getenv(
 )
 
 # ===========================================
+# Shopify Sync Configuration
+# ===========================================
+# Enable Shopify sync to push posts from Supabase to Shopify
+ENABLE_SHOPIFY_SYNC = os.getenv("ENABLE_SHOPIFY_SYNC", "false").lower() == "true"
+
+# Shopify store name (the part before .myshopify.com)
+SHOPIFY_STORE = os.getenv("SHOPIFY_STORE", "")
+
+# Shopify OAuth credentials (from Dev Dashboard)
+# These are used to obtain access tokens via client credentials grant
+SHOPIFY_CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
+
+# Shopify Admin API version
+SHOPIFY_API_VERSION = os.getenv("SHOPIFY_API_VERSION", "2025-01")
+
+# Default author name for Shopify articles (display name, not a Shopify user)
+SHOPIFY_DEFAULT_AUTHOR = os.getenv("SHOPIFY_DEFAULT_AUTHOR", "")
+
+# Whether to automatically sync to Shopify when saving posts
+SHOPIFY_SYNC_ON_PUBLISH = os.getenv("SHOPIFY_SYNC_ON_PUBLISH", "true").lower() == "true"
+
+# ===========================================
 # Content Block Types (for reference)
 # ===========================================
 SUPPORTED_BLOCK_TYPES = [

@@ -13,7 +13,13 @@ import os
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import SUPABASE_URL, get_supabase_headers, DEFAULT_STATUS
+from config import (
+    SUPABASE_URL,
+    get_supabase_headers,
+    DEFAULT_STATUS,
+    ENABLE_SHOPIFY_SYNC,
+    SHOPIFY_SYNC_ON_PUBLISH,
+)
 
 
 async def create_blog_post(args: dict[str, Any]) -> dict[str, Any]:
@@ -76,10 +82,73 @@ async def create_blog_post(args: dict[str, Any]) -> dict[str, Any]:
                     if resp.status in [200, 201]:
                         tags_linked = len(tag_ids)
 
+            result_text = f"Created: {post_id} ({created_post['slug']})" + (f" +{tags_linked} tags" if tags_linked else "")
+
+            # Auto-sync to Shopify if enabled
+            if ENABLE_SHOPIFY_SYNC and SHOPIFY_SYNC_ON_PUBLISH:
+                try:
+                    from tools.shopify_sync import ensure_category_synced, get_post_tags, update_post_shopify_fields
+                    from tools.shopify_tools import sync_post_to_shopify, get_shopify_visibility_label
+
+                    category_id = args.get("category_id")
+                    shopify_blog_gid = None
+
+                    if category_id:
+                        shopify_blog_gid = await ensure_category_synced(category_id)
+
+                    if shopify_blog_gid:
+                        # Get tag names from the tags we just linked
+                        tag_names = []
+                        if tag_ids:
+                            tag_names = await get_post_tags(post_id)
+
+                        # Get author name
+                        author_name = None
+                        author_id = args.get("author_id")
+                        if author_id:
+                            async with session.get(
+                                f"{SUPABASE_URL}/rest/v1/blog_authors?id=eq.{author_id}&select=name&limit=1",
+                                headers=headers
+                            ) as author_resp:
+                                if author_resp.status == 200:
+                                    authors = await author_resp.json()
+                                    if authors:
+                                        author_name = authors[0].get('name')
+
+                        status = args.get("status", DEFAULT_STATUS)
+                        sync_result = await sync_post_to_shopify(
+                            post_id=post_id,
+                            title=args["title"],
+                            slug=args["slug"],
+                            excerpt=args["excerpt"],
+                            content=args["content"],
+                            status=status,
+                            shopify_blog_gid=shopify_blog_gid,
+                            author_name=author_name,
+                            featured_image=args.get("featured_image"),
+                            featured_image_alt=args.get("featured_image_alt"),
+                            seo=args.get("seo"),
+                            scheduled_at=args.get("scheduled_at"),
+                            tags=tag_names,
+                        )
+
+                        if sync_result.get("success"):
+                            await update_post_shopify_fields(post_id, shopify_article_id=sync_result["shopify_article_id"])
+                            visibility = get_shopify_visibility_label(status)
+                            result_text += f" | Synced to Shopify ({visibility})"
+                        else:
+                            await update_post_shopify_fields(post_id, error=sync_result.get("error"))
+                            result_text += f" | Shopify sync failed: {sync_result.get('error', 'Unknown')[:50]}"
+                    else:
+                        result_text += " | Shopify: no category synced"
+
+                except Exception as sync_error:
+                    result_text += f" | Shopify sync error: {str(sync_error)[:50]}"
+
             return {
                 "content": [{
                     "type": "text",
-                    "text": f"Created: {post_id} ({created_post['slug']})" + (f" +{tags_linked} tags" if tags_linked else "")
+                    "text": result_text
                 }]
             }
 
