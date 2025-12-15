@@ -788,28 +788,48 @@ WORKFLOW:
    - topic: "{post['title']}"
    - exclude_slug: the post's slug
 
-The suggestions are PRE-FILTERED for semantic relevance. Each includes `anchor_patterns` to search for:
+Suggestions include semantic disambiguation data (example pattern - apply to your content):
 ```
-{{"url": "/blog/related-topic", "title": "Related Topic Guide", "anchor_patterns": ["related topic", "topic guide"]}}
+{{
+  "url": "/blog/how-to-grip-golf-club",
+  "title": "How to Grip a Golf Club",
+  "anchor_patterns": ["grip technique", "hand position"],
+  "anti_patterns": ["grip on the club", "lose your grip"],
+  "semantic_intent": "hand positioning technique"
+}}
 ```
 
-3. For EACH suggestion, search the content for its anchor_patterns (case-insensitive)
+- `anchor_patterns`: Phrases to search for in content
+- `anti_patterns`: Phrases that look similar but have DIFFERENT meanings - SKIP these
+- `semantic_intent`: What the target article actually teaches
+
+3. For EACH suggestion:
+   - Search content for `anchor_patterns` (case-insensitive)
+   - If found phrase matches any `anti_pattern`, SKIP it (different semantic meaning)
 4. Call `validate_urls` with your planned URLs
-5. Call `apply_link_insertions` - IMPORTANT: include `target_title` for context validation:
+5. Call `apply_link_insertions` - include ALL fields for semantic validation:
 ```
-{{"insertions": [{{"anchor_text": "found phrase", "url": "/blog/slug", "target_title": "Article Title"}}]}}
+{{"insertions": [{{
+  "anchor_text": "found phrase",
+  "url": "/blog/slug",
+  "target_title": "Article Title",
+  "anti_patterns": ["phrase to avoid", "another avoid"]
+}}]}}
 ```
 
-The system will verify the anchor text is used appropriately in context before applying the link.
+The system performs two-stage validation:
+1. Anti-pattern filter (fast, deterministic)
+2. AI semantic validation (checks if meaning matches)
 
 RULES:
 - Only link phrases that naturally appear in the content
-- Use the `anchor_patterns` provided - don't invent random phrases
-- Always include `target_title` in each insertion (from the suggestion's title field)
+- Use `anchor_patterns` provided - don't invent random phrases
+- SKIP any phrase that matches an `anti_pattern` (semantic mismatch)
+- Always include `target_title` AND `anti_patterns` in each insertion
 - If a pattern isn't found, skip that suggestion
 - If no patterns match, respond: "Skipping - no matching phrases found"
 
-The anchor text should tell the reader what they'll find when they click."""
+The anchor text meaning must match what the target article teaches."""
 
         # Run the agent with backfill tools
         agent_result = await run_agent(
@@ -1101,6 +1121,9 @@ Examples:
   python generator.py --cleanup-links-id post-uuid
   python generator.py --cleanup-links-all
 
+  # Remove a single link by its blog_post_links table ID
+  python generator.py --remove-link link-uuid
+
   # Remove bad featured image (clears DB + deletes from storage)
   python generator.py --cleanup-image post-slug
   python generator.py --cleanup-image-id post-uuid
@@ -1193,6 +1216,12 @@ Examples:
         "--cleanup-links-all",
         action="store_true",
         help="Remove internal links from ALL published posts"
+    )
+    parser.add_argument(
+        "--remove-link",
+        type=str,
+        metavar="LINK_UUID",
+        help="Remove a single link by its blog_post_links table ID"
     )
     parser.add_argument(
         "--cleanup-image",
@@ -1653,6 +1682,20 @@ Examples:
             print(f"Removed {results[0].get('removed', 0)} internal links")
         else:
             print(f"Error: {results[0].get('error', 'Unknown error')}")
+
+    elif args.remove_link:
+        from tools.link_tools import remove_single_link_by_id
+        print(f"Cleanup Mode: Removing single link with ID '{args.remove_link}'")
+        result = asyncio.run(remove_single_link_by_id(args.remove_link))
+        if result.get("success"):
+            print(f"Removed link from '{result.get('post_slug', 'post')}'")
+            print(f"  URL: {result.get('url', 'N/A')}")
+            print(f"  Anchor text: {result.get('anchor_text', 'N/A')}")
+            print(f"  Link type: {result.get('link_type', 'N/A')}")
+            if not result.get("removed_from_content"):
+                print("  Note: Link record deleted but URL not found in post content")
+        else:
+            print(f"Error: {result.get('error', 'Unknown error')}")
 
     elif args.cleanup_image:
         from tools.image_tools import cleanup_post_image

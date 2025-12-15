@@ -109,6 +109,9 @@ python generator.py --backfill-links-slug post-slug
 python generator.py --cleanup-links post-slug
 python generator.py --cleanup-links-id <uuid>
 python generator.py --cleanup-links-all
+
+# Remove a single link by its blog_post_links table ID
+python generator.py --remove-link <link-uuid>
 ```
 
 ## Shopify Sync

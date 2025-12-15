@@ -261,32 +261,54 @@ These targets assume a mature catalog (50+ posts). For smaller catalogs, interna
 4. Call `validate_urls` to verify your planned URLs exist
 5. Call `apply_link_insertions` with the matches you found
 
-**Understanding anchor_patterns:**
+**Understanding suggestions (with semantic disambiguation):**
+
+These examples illustrate the pattern - apply the same logic to your niche:
 ```json
 {
-  "url": "/blog/troubleshooting-common-errors",
-  "title": "Troubleshooting Common Errors",
-  "anchor_patterns": ["troubleshooting", "common errors", "error handling"]
+  "url": "/blog/how-to-grip-golf-club",
+  "title": "How to Grip a Golf Club Properly",
+  "anchor_patterns": ["grip technique", "hand position", "proper grip"],
+  "anti_patterns": ["grip on the club", "lose your grip", "affect your grip"],
+  "semantic_intent": "hand positioning technique for holding club"
 }
 ```
-Search the content for "troubleshooting", "common errors", or "error handling". If found, that's your anchor text.
 
-**Using apply_link_insertions (include target_title for context validation):**
+- **anchor_patterns**: Phrases that describe what the target TEACHES - search for these
+- **anti_patterns**: Phrases that look similar but have DIFFERENT meanings - AVOID linking these
+- **semantic_intent**: What concept the target article is about
+
+**CRITICAL - Semantic Disambiguation:**
+The same word can have different meanings. For example:
+- "grip on the club" (in context of soap residue) = physical traction/friction
+- "How to Grip a Golf Club" (article) = hand positioning technique
+
+These are DIFFERENT concepts. The `anti_patterns` field lists phrases to AVOID even if they match keywords.
+
+**Using apply_link_insertions (include target_title and anti_patterns):**
 ```json
 {
   "post_id": "uuid-here",
   "insertions": [
-    {"anchor_text": "common errors", "url": "/blog/troubleshooting-common-errors", "target_title": "Troubleshooting Common Errors"},
-    {"anchor_text": "best practices", "url": "/blog/best-practices-guide", "target_title": "Best Practices Guide"}
+    {
+      "anchor_text": "grip technique",
+      "url": "/blog/how-to-grip-golf-club",
+      "target_title": "How to Grip a Golf Club Properly",
+      "anti_patterns": ["grip on the club", "lose your grip"]
+    }
   ]
 }
 ```
 
-The system validates context before applying - it checks that "common errors" in the surrounding sentence actually relates to the target article about troubleshooting.
+The system performs two-stage validation:
+1. **Anti-pattern filter**: Rejects if anchor matches any anti_pattern
+2. **Semantic validation**: AI checks if anchor text meaning matches target article
 
 **Rules:**
-- **Include target_title** - Required for context validation
+- **Include target_title** - Required for semantic validation
+- **Include anti_patterns** - Pass through from suggestions for disambiguation
 - **Use anchor_patterns** - Only search for the patterns provided, don't invent phrases
+- **Check anti_patterns first** - If found text matches an anti_pattern, skip it
 - **Quality over quantity** - Fewer good links beat many forced ones
 - **Skip if no match** - If no patterns are found in the content, skip that suggestion
 

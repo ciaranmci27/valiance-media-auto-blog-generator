@@ -149,7 +149,7 @@ Add internal links to posts that have fewer than recommended for your catalog si
 python generator.py --backfill-links                    # Process 1 post (default)
 python generator.py --backfill-links --count 5          # Process up to 5 posts
 python generator.py --backfill-links-all                # Process ALL posts that need links
-python generator.py --backfill-links-id <uuid>          # Process a specific post by ID
+python generator.py --backfill-links-id "uuid"          # Process a specific post by ID
 python generator.py --backfill-links-slug post-slug     # Process a specific post by slug
 python generator.py --backfill-links --verbose          # Show detailed progress
 ```
@@ -178,6 +178,18 @@ The cleanup process:
 1. Strips all internal `<a href="/...">` tags from post content
 2. Preserves the anchor text (link text remains, just not linked)
 3. Deletes matching records from the `blog_post_links` table
+
+### Remove a Single Link
+Remove a specific link by its `blog_post_links` table ID (useful for removing individual bad links without affecting others).
+
+```bash
+python generator.py --remove-link "uuid"       # Remove single link by its ID
+```
+
+This command:
+1. Looks up the link record to find the URL and associated post
+2. Removes the specific `<a>` tag from the post content (preserves anchor text)
+3. Deletes the link record from the `blog_post_links` table
 
 **Typical workflow to fix bad links:**
 ```bash

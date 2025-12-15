@@ -120,6 +120,62 @@ def extract_anchor_patterns(title: str) -> list[str]:
     return patterns[:5]
 
 
+def is_quality_anchor(anchor: str) -> bool:
+    """
+    Validate that an anchor text is specific enough to be a quality link.
+    Rejects overly generic, single-word, or vague anchors.
+
+    Returns True if anchor passes quality checks, False otherwise.
+    """
+    if not anchor:
+        return False
+
+    anchor_lower = anchor.lower().strip()
+    words = anchor_lower.split()
+
+    # Reject single words (too generic)
+    if len(words) < 2:
+        return False
+
+    # Reject very short anchors (less than 8 chars total)
+    if len(anchor_lower) < 8:
+        return False
+
+    # Generic terms that are too vague on their own
+    generic_terms = {
+        # Single concept generics
+        'golf tips', 'golf rules', 'golf equipment', 'golf courses',
+        'golf clubs', 'golf balls', 'golf game', 'golf swing',
+        'the masters', 'the open', 'the pga', 'pga tour',
+        'ball striking', 'club head', 'swing speed',
+        # Overly broad phrases
+        'how to golf', 'golf basics', 'golf guide', 'golf help',
+        'learn golf', 'play golf', 'playing golf',
+        # Generic instructional
+        'tips and tricks', 'best practices', 'common mistakes',
+        'quick tips', 'easy tips', 'simple tips',
+    }
+
+    if anchor_lower in generic_terms:
+        return False
+
+    # Check if it's just a proper noun (capitalized words only)
+    # This catches "The Masters", "Tiger Woods", etc.
+    original_words = anchor.strip().split()
+    if all(w[0].isupper() for w in original_words if w):
+        # All words are capitalized - likely a proper noun
+        # Only allow if it's descriptive (3+ words)
+        if len(original_words) < 3:
+            return False
+
+    return True
+
+
+def filter_quality_anchors(anchors: list[str]) -> list[str]:
+    """Filter anchor patterns to only include quality anchors."""
+    return [a for a in anchors if is_quality_anchor(a)]
+
+
 async def score_link_relevance(
     source_title: str,
     source_excerpt: str,
@@ -127,11 +183,12 @@ async def score_link_relevance(
 ) -> list[dict]:
     """
     Use Claude Haiku to score relevance AND extract semantic anchor patterns.
-    Returns only candidates with relevance score >= 7, with AI-generated anchor patterns.
+    Returns only candidates with relevance score >= 8, with AI-generated patterns.
 
     This prevents:
     - Irrelevant links (e.g., "slice fix" article linking to "bag rules" article)
     - Bad anchor text (e.g., "golf ball" linking to "how to stop topping")
+    - Semantic mismatches (e.g., "grip" meaning traction vs technique)
 
     The anchor patterns are semantically meaningful - they describe what the
     TARGET article is actually about, not just words from the title.
@@ -142,7 +199,11 @@ async def score_link_relevance(
         candidates: List of potential link targets with title and url
 
     Returns:
-        Filtered list of relevant candidates with scores and anchor_patterns
+        Filtered list of relevant candidates, each with:
+        - relevance_score: 7-10 rating
+        - anchor_patterns: Phrases to search for in content
+        - anti_patterns: Phrases to AVOID (different semantic meaning)
+        - semantic_intent: What the target article teaches
     """
     if not candidates:
         return []
@@ -153,42 +214,61 @@ async def score_link_relevance(
         for i, c in enumerate(candidates)
     ])
 
-    prompt = f"""You are evaluating internal links for a blog post.
+    prompt = f"""You are a STRICT evaluator of internal links. Your job is to REJECT weak links.
 
 SOURCE ARTICLE: "{source_title}"
 {f'Description: {source_excerpt}' if source_excerpt else ''}
 
-CANDIDATE LINKS (potential pages to link TO from the source article):
+CANDIDATE LINKS (potential pages to link TO):
 {candidate_list}
 
 For EACH candidate, provide:
-1. relevance_score (1-10): Would a reader of the SOURCE benefit from this link?
-2. anchor_patterns: 2-4 phrases that describe what the TARGET article is about
+1. score (1-10): STRICT scoring - see criteria below
+2. anchors: 2-4 SPECIFIC phrases (not generic terms)
+3. anti: phrases that look similar but have DIFFERENT meaning
+4. intent: 5-10 word description of target's core concept
 
-SCORING:
-- 9-10: Directly related (same problem, complementary technique)
-- 7-8: Related topic (same domain, natural reader interest)
-- 4-6: Loosely related (same category, different focus)
-- 1-3: Unrelated (no reader benefit)
+STRICT SCORING CRITERIA:
+- 9-10: DIRECTLY answers a question the source reader would have
+        Example: "Golf Cart Costs" → "Golf Cart Maintenance Costs" ✓
+- 7-8: Closely related sub-topic that provides genuine value
+        Example: "Golf Cart Costs" → "Electric vs Gas Golf Carts" ✓
+- 4-6: Same broad category but DIFFERENT focus - DO NOT LINK
+        Example: "Golf Cart Costs" → "How Many Golf Courses in USA" ✗
+- 1-3: Unrelated - just happens to be in same niche
 
-ANCHOR PATTERN RULES (CRITICAL):
-- Patterns must describe what the TARGET article teaches/covers
-- Use the CORE TOPIC, not generic words from the title
-- IMPORTANT: If the target is a NICHE/SPECIFIC article, patterns must reflect that specificity
+CRITICAL - SCORE LOW (1-5) IF:
+- Topics share a category but have DIFFERENT purposes
+- Link would only make sense because they're "both about [niche]"
+- Reader would think "why is this linked here?"
+- Anchor would be a generic term (single words, proper nouns alone)
 
-SPECIFICITY EXAMPLES:
-- Target "Complete Beginner's Guide" → patterns: ["beginner's guide", "getting started"] ✓
-- Target "Guide for Left-Handed Users" → patterns: ["left-handed", "left-handed users"] ✓
-  NOT: ["guide", "users"] ✗ (too general for this niche article)
-- Target "Tips for Small Spaces" → patterns: ["small spaces", "limited space"] ✓
-  NOT: ["tips", "spaces"] ✗ (too general)
+BAD LINK EXAMPLES (score 1-5):
+- "Golf Cart Costs" → "How Many Clubs Allowed in Bag" (DIFFERENT topics, score: 2)
+- "Golf Cart Costs" → "How Many Golf Courses in USA" (DIFFERENT topics, score: 2)
+- "History of Golf" → "When is The Masters 2025" (historical vs schedule, score: 3)
+- "Inconsistent Ball Striking" → "Stop Topping the Ball" (broad vs specific, score: 5)
 
-EXAMPLE for target "How to Fix Common Errors":
-- anchor_patterns: ["fix errors", "common errors", "error fixing"] ✓
-- NOT: ["how to", "common"] ✗ (not the core topic)
+GOOD LINK EXAMPLES (score 8-10):
+- "Golf Cart Costs" → "Golf Cart Maintenance Guide" (same topic area, score: 9)
+- "How to Grip a Golf Club" → "Common Grip Mistakes" (complementary, score: 9)
+- "Best Drivers 2025" → "Driver Fitting Guide" (helps same reader, score: 8)
 
-Respond with ONLY a JSON array, one object per candidate:
-[{{"score": 8, "anchors": ["pattern1", "pattern2"]}}, {{"score": 3, "anchors": []}}]"""
+ANCHOR QUALITY RULES (CRITICAL):
+- NEVER use single generic words: "golf", "course", "club", "driver"
+- NEVER use proper nouns alone: "The Masters", "PGA", "Tiger Woods"
+- NEVER use vague phrases: "golf equipment", "golf rules", "golf tips"
+- ALWAYS use specific, descriptive phrases that explain what reader will learn
+- Anchors must be 2-5 words and describe the TARGET's specific value
+
+BAD ANCHORS: ["Golf courses", "The Masters", "golf equipment rules", "ball striking"]
+GOOD ANCHORS: ["golf cart maintenance costs", "grip pressure mistakes", "driver loft selection"]
+
+SEMANTIC DISAMBIGUATION:
+Same word can have different meanings - generate anti-patterns to avoid wrong contexts.
+
+Respond with ONLY a JSON array:
+[{{"score": 8, "anchors": ["specific phrase 1", "specific phrase 2"], "anti": ["avoid1"], "intent": "core concept"}}, {{"score": 2, "anchors": [], "anti": [], "intent": ""}}]"""
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -201,15 +281,17 @@ Respond with ONLY a JSON array, one object per candidate:
                 },
                 json={
                     "model": "claude-3-5-haiku-20241022",
-                    "max_tokens": 500,
+                    "max_tokens": 800,
                     "messages": [{"role": "user", "content": prompt}]
                 },
                 timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:
-                    # On error, fall back to regex patterns
+                    # On error, fall back to regex patterns (no anti-patterns available)
                     for c in candidates:
                         c["anchor_patterns"] = extract_anchor_patterns(c["title"])
+                        c["anti_patterns"] = []
+                        c["semantic_intent"] = ""
                     return candidates
 
                 result = await resp.json()
@@ -223,28 +305,47 @@ Respond with ONLY a JSON array, one object per candidate:
                 evaluations = json.loads(response_text)
 
                 if not isinstance(evaluations, list) or len(evaluations) != len(candidates):
-                    # Invalid response, fall back
+                    # Invalid response, fall back (no anti-patterns available)
                     for c in candidates:
                         c["anchor_patterns"] = extract_anchor_patterns(c["title"])
+                        c["anti_patterns"] = []
+                        c["semantic_intent"] = ""
                     return candidates
 
-                # Filter to relevant candidates and add AI-generated anchor patterns
+                # Filter to relevant candidates and add AI-generated patterns
                 relevant = []
                 for candidate, evaluation in zip(candidates, evaluations):
                     score = evaluation.get("score", 0)
                     anchors = evaluation.get("anchors", [])
+                    anti_patterns = evaluation.get("anti", [])
+                    semantic_intent = evaluation.get("intent", "")
 
-                    if isinstance(score, (int, float)) and score >= 7:
+                    if isinstance(score, (int, float)) and score >= 8:
+                        # Filter anchors to only quality ones
+                        quality_anchors = filter_quality_anchors(anchors)
+
+                        # Fall back to extracted patterns if no quality anchors
+                        if not quality_anchors:
+                            quality_anchors = filter_quality_anchors(extract_anchor_patterns(candidate["title"]))
+
+                        # Skip candidate entirely if no quality anchors available
+                        if not quality_anchors:
+                            continue
+
                         candidate["relevance_score"] = score
-                        candidate["anchor_patterns"] = anchors if anchors else extract_anchor_patterns(candidate["title"])
+                        candidate["anchor_patterns"] = quality_anchors
+                        candidate["anti_patterns"] = anti_patterns if anti_patterns else []
+                        candidate["semantic_intent"] = semantic_intent
                         relevant.append(candidate)
 
                 return relevant
 
     except Exception as e:
-        # On any error, fail open with regex patterns
+        # On any error, fail open with regex patterns (no anti-patterns available)
         for c in candidates:
             c["anchor_patterns"] = extract_anchor_patterns(c["title"])
+            c["anti_patterns"] = []
+            c["semantic_intent"] = ""
         return candidates
 
 
@@ -291,20 +392,36 @@ async def validate_link_context(
     Use Haiku to verify that linking anchor_text in this context makes sense
     for the target article.
 
-    This prevents linking "topping" in "topping the leaderboard" to an article
-    about "how to stop topping the golf ball".
+    This prevents linking words used in different semantic contexts, e.g.,
+    "grip" (traction) should not link to an article about "grip" (technique).
     """
     if not context or not anchor_text or not target_title:
         return False
 
-    prompt = f"""Does linking the phrase "{anchor_text}" in this context make sense for an article about "{target_title}"?
+    prompt = f"""You are a STRICT link quality evaluator. REJECT weak or irrelevant links.
 
+ANCHOR TEXT: "{anchor_text}"
 CONTEXT: "{context}"
 TARGET ARTICLE: "{target_title}"
 
+Ask yourself:
+1. Is the anchor SPECIFIC (not generic like "golf tips", "The Masters")?
+2. Would a reader HERE genuinely want to click to that target?
+3. Does the anchor ACCURATELY describe what the target teaches?
+
+Say "no" if:
+- Anchor is too generic or vague
+- Target is only loosely related (same niche but different topic)
+- Reader would think "why is this linked here?"
+
+Examples (apply pattern to any niche):
+- "Golf courses" → "How Many Golf Courses in USA" = NO (generic anchor, unrelated to reader's goal)
+- "The Masters" → "When is Masters 2025" = NO (proper noun alone, doesn't help reader)
+- "grip technique" → "How to Grip a Golf Club" = YES (specific, directly helpful)
+
 Answer ONLY "yes" or "no".
-- "yes" = the phrase in this context relates to what the target article is about
-- "no" = the phrase is used differently here, or linking would be confusing"""
+- "yes" = specific anchor + genuinely helpful link
+- "no" = generic, loosely related, or unhelpful"""
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -383,23 +500,49 @@ async def validate_link_contexts_batch(
     if not validations:
         return insertions  # No contexts found, return all
 
-    prompt = f"""For each link below, evaluate if the anchor text should link to the target article.
+    prompt = f"""You are a STRICT link quality evaluator. REJECT weak or irrelevant links.
 
 {chr(10).join(validations)}
 
-Check TWO things:
-1. CONTEXT: Is the anchor text used in a way that relates to the target topic?
-2. SPECIFICITY: Does the anchor text accurately represent the target article's scope?
+For EACH link, ask these questions:
+1. Does the anchor text ACCURATELY describe what the target teaches?
+2. Would a reader AT THIS POINT genuinely want to click this link?
+3. Is this link HELPFUL or just "related to the same topic"?
 
-SPECIFICITY EXAMPLES:
-- Anchor "setup guide" → Target "Complete Setup Guide" = ✓ (general → general)
-- Anchor "setup guide" → Target "Setup Guide for Windows Users" = ✗ (general anchor, but target is niche subset)
-- Anchor "windows setup" → Target "Setup Guide for Windows Users" = ✓ (specific → specific)
-- Anchor "troubleshooting" → Target "Troubleshooting for Beginners" = ✗ (too general for niche target)
+REJECT (false) if ANY of these are true:
+- Anchor is too GENERIC (e.g., "Golf courses", "The Masters", "golf tips")
+- Target article is only LOOSELY related (same niche but different topic)
+- Reader would think "why is this linked here?"
+- Anchor doesn't clearly describe what they'll learn by clicking
 
-Answer with ONLY a JSON array of booleans, like: [true, false, true]
-- true = context is appropriate AND anchor specificity matches target scope
-- false = wrong context OR anchor is too general/specific for the target"""
+These examples illustrate the pattern - apply to ANY niche:
+
+REJECT EXAMPLES (answer: false):
+- Anchor "Golf courses" | Context: "...cost varies by golf courses..." | Target: "How Many Golf Courses in USA"
+  → Generic anchor, reader doesn't want statistics while reading about costs → false
+
+- Anchor "The Masters" | Context: "...history of The Masters tournament..." | Target: "When is The Masters 2025"
+  → Historical context, schedule article doesn't fit → false
+
+- Anchor "golf equipment rules" | Context: "...follow golf equipment rules..." | Target: "How Many Clubs Allowed in Bag"
+  → Too vague anchor for specific rules article → false
+
+- Anchor "ball striking" | Context: "...improve ball striking consistency..." | Target: "How to Stop Topping the Ball"
+  → Broad concept linked to ONE specific type → false
+
+APPROVE EXAMPLES (answer: true):
+- Anchor "grip technique" | Context: "...proper grip technique matters for..." | Target: "How to Grip a Golf Club"
+  → Specific anchor, directly relevant target → true
+
+- Anchor "driver distance tips" | Context: "...maximize your driver distance tips..." | Target: "How to Hit Driver Farther"
+  → Specific anchor matching target's purpose → true
+
+- Anchor "common grip mistakes" | Context: "...avoid common grip mistakes..." | Target: "Golf Grip Mistakes to Avoid"
+  → Perfect match between anchor and target → true
+
+Answer with ONLY a JSON array of booleans: [true, false, true]
+- true = specific anchor + genuinely helpful link
+- false = generic anchor, loosely related, or reader wouldn't benefit"""
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -594,19 +737,26 @@ async def get_internal_link_suggestions(args: dict[str, Any]) -> dict[str, Any]:
                 if post.get("blog_categories"):
                     cat_slug = post["blog_categories"].get("slug")
 
-                suggestions.append({
+                suggestion = {
                     "url": build_internal_url(post["slug"], cat_slug),
                     "title": post["title"],
                     "anchor_patterns": scored.get("anchor_patterns", []),  # AI-generated patterns
                     "relevance_score": scored.get("relevance_score", 7)
-                })
+                }
+                # Include anti-patterns if available (for semantic disambiguation)
+                if scored.get("anti_patterns"):
+                    suggestion["anti_patterns"] = scored["anti_patterns"]
+                if scored.get("semantic_intent"):
+                    suggestion["semantic_intent"] = scored["semantic_intent"]
+                suggestions.append(suggestion)
 
             # Log suggestions
             if suggestions:
                 print(f"  → Found {len(suggestions)} relevant link targets:")
                 for s in suggestions[:5]:  # Show first 5
                     patterns_preview = ", ".join(s["anchor_patterns"][:3]) if s["anchor_patterns"] else "none"
-                    print(f"     • {s['title'][:40]}... (patterns: {patterns_preview})")
+                    anti_preview = f" | avoid: {', '.join(s.get('anti_patterns', [])[:2])}" if s.get("anti_patterns") else ""
+                    print(f"     • {s['title'][:40]}... (patterns: {patterns_preview}{anti_preview})")
 
             # Provide context-aware guidance based on catalog size
             # Must align with get_posts_needing_links caps
@@ -1139,6 +1289,7 @@ async def apply_link_insertions(args: dict[str, Any]) -> dict[str, Any]:
     - anchor_text: The text to wrap in a link (required)
     - url: The link URL (required)
     - target_title: Title of target article (enables context validation)
+    - anti_patterns: List of phrases to avoid (optional, for semantic disambiguation)
     - block_id: Optional specific block to target
     """
     try:
@@ -1168,6 +1319,67 @@ async def apply_link_insertions(args: dict[str, Any]) -> dict[str, Any]:
             content = posts[0].get("content", [])
             if not content:
                 return {"content": [{"type": "text", "text": "Post has no content"}], "is_error": True}
+
+            # Anti-pattern pre-filter - fast, deterministic check before API validation
+            # Catches obvious semantic mismatches (e.g., "grip on the club" for a "grip technique" article)
+            anti_pattern_rejected = []
+            filtered_by_anti = []
+            for ins in insertions:
+                anti_patterns = ins.get("anti_patterns", [])
+                if anti_patterns:
+                    anchor_lower = ins.get("anchor_text", "").lower()
+                    # Check if anchor text matches or is contained in any anti-pattern
+                    matched_anti = None
+                    for anti in anti_patterns:
+                        anti_lower = anti.lower()
+                        # Match if: anchor contains anti-pattern OR anti-pattern contains anchor
+                        if anti_lower in anchor_lower or anchor_lower in anti_lower:
+                            matched_anti = anti
+                            break
+                    if matched_anti:
+                        anti_pattern_rejected.append({
+                            "anchor": ins.get("anchor_text"),
+                            "anti_pattern": matched_anti,
+                            "target": ins.get("target_title", "unknown")
+                        })
+                        continue
+                filtered_by_anti.append(ins)
+
+            if anti_pattern_rejected:
+                print(f"  → Anti-pattern filter rejected {len(anti_pattern_rejected)} link(s):")
+                for rej in anti_pattern_rejected:
+                    print(f"     ✗ \"{rej['anchor']}\" matches anti-pattern \"{rej['anti_pattern']}\"")
+
+            insertions = filtered_by_anti
+
+            # Anchor quality filter - reject overly generic anchors
+            quality_rejected = []
+            filtered_by_quality = []
+            for ins in insertions:
+                anchor = ins.get("anchor_text", "")
+                if is_quality_anchor(anchor):
+                    filtered_by_quality.append(ins)
+                else:
+                    quality_rejected.append({
+                        "anchor": anchor,
+                        "target": ins.get("target_title", "unknown"),
+                        "reason": "too generic or short"
+                    })
+
+            if quality_rejected:
+                print(f"  → Anchor quality filter rejected {len(quality_rejected)} link(s):")
+                for rej in quality_rejected:
+                    print(f"     ✗ \"{rej['anchor']}\" - {rej['reason']}")
+
+            insertions = filtered_by_quality
+
+            if not insertions:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": "No links applied - all rejected (anti-pattern match or low anchor quality)"
+                    }]
+                }
 
             # Context validation phase - validate anchor text in context before applying
             # This prevents linking "topping" in "topping the leaderboard" to an article about golf topping
@@ -1453,6 +1665,162 @@ async def remove_internal_links_from_post(post_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+async def remove_single_link_by_id(link_id: str) -> dict[str, Any]:
+    """
+    Remove a single link from a post by its blog_post_links.id.
+
+    This:
+    1. Fetches the link record to get URL and post_id
+    2. Removes the <a> tag from the post content (preserving anchor text)
+    3. Deletes the link record from blog_post_links table
+
+    Args:
+        link_id: The UUID from the blog_post_links table
+
+    Returns:
+        Dict with success status and details
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = get_supabase_headers()
+
+            # Fetch the link record
+            async with session.get(
+                f"{SUPABASE_URL}/rest/v1/blog_post_links?id=eq.{link_id}&select=id,post_id,url,anchor_text,link_type",
+                headers=headers
+            ) as resp:
+                if resp.status != 200:
+                    return {"success": False, "error": "Failed to fetch link record"}
+                links = await resp.json()
+
+            if not links:
+                return {"success": False, "error": f"Link with ID '{link_id}' not found"}
+
+            link_record = links[0]
+            post_id = link_record["post_id"]
+            url = link_record["url"]
+            anchor_text = link_record.get("anchor_text", "")
+            link_type = link_record.get("link_type", "unknown")
+
+            # Fetch the post content
+            async with session.get(
+                f"{SUPABASE_URL}/rest/v1/blog_posts?id=eq.{post_id}&select=id,slug,content",
+                headers=headers
+            ) as resp:
+                if resp.status != 200:
+                    return {"success": False, "error": "Failed to fetch post"}
+                posts = await resp.json()
+
+            if not posts:
+                return {"success": False, "error": "Post not found"}
+
+            post = posts[0]
+            content = post.get("content", [])
+
+            if not content:
+                # No content, just delete the link record
+                async with session.delete(
+                    f"{SUPABASE_URL}/rest/v1/blog_post_links?id=eq.{link_id}",
+                    headers=headers
+                ) as resp:
+                    pass
+                return {"success": True, "removed": True, "post_slug": post["slug"], "message": "Link record deleted (post has no content)"}
+
+            # Build regex to match this specific link
+            # Escape special regex characters in URL
+            escaped_url = re.escape(url)
+            # Match <a> tag with this exact href
+            link_pattern = re.compile(
+                rf'<a\s+[^>]*href=["\']({escaped_url})["\'][^>]*>([^<]*)</a>',
+                re.IGNORECASE
+            )
+
+            removed = False
+
+            def strip_specific_link(text: str) -> tuple[str, bool]:
+                """Remove the specific link, return cleaned text and whether it was found."""
+                match = link_pattern.search(text)
+                if match:
+                    # Replace link with just the anchor text
+                    cleaned = link_pattern.sub(r'\2', text, count=1)
+                    return cleaned, True
+                return text, False
+
+            # Process each block
+            for block in content:
+                if removed:
+                    break
+
+                block_type = block.get("type", "")
+                data = block.get("data", {})
+
+                if block_type == "paragraph":
+                    text = data.get("text", "")
+                    cleaned, found = strip_specific_link(text)
+                    if found:
+                        data["text"] = cleaned
+                        removed = True
+
+                elif block_type == "list":
+                    items = data.get("items", [])
+                    for i, item in enumerate(items):
+                        if isinstance(item, str):
+                            cleaned, found = strip_specific_link(item)
+                            if found:
+                                items[i] = cleaned
+                                removed = True
+                                break
+
+                elif block_type == "callout":
+                    text = data.get("text", "")
+                    cleaned, found = strip_specific_link(text)
+                    if found:
+                        data["text"] = cleaned
+                        removed = True
+
+                elif block_type == "accordion":
+                    for item in data.get("items", []):
+                        answer = item.get("answer", "")
+                        cleaned, found = strip_specific_link(answer)
+                        if found:
+                            item["answer"] = cleaned
+                            removed = True
+                            break
+
+            # Save updated content if we removed the link
+            if removed:
+                async with session.patch(
+                    f"{SUPABASE_URL}/rest/v1/blog_posts?id=eq.{post_id}",
+                    headers=headers,
+                    json={
+                        "content": content,
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                ) as resp:
+                    if resp.status not in [200, 204]:
+                        return {"success": False, "error": "Failed to save updated content"}
+
+            # Delete the link record from tracking table
+            async with session.delete(
+                f"{SUPABASE_URL}/rest/v1/blog_post_links?id=eq.{link_id}",
+                headers=headers
+            ) as resp:
+                if resp.status not in [200, 204]:
+                    return {"success": False, "error": "Failed to delete link record"}
+
+            return {
+                "success": True,
+                "removed_from_content": removed,
+                "post_slug": post["slug"],
+                "url": url,
+                "anchor_text": anchor_text,
+                "link_type": link_type
+            }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 async def cleanup_internal_links(post_slugs: list[str] = None, all_posts: bool = False) -> list[dict]:
     """
     Remove internal links from specified posts or all posts.
@@ -1506,7 +1874,7 @@ async def cleanup_internal_links(post_slugs: list[str] = None, all_posts: bool =
 LINK_TOOLS = [
     {
         "name": "get_internal_link_suggestions",
-        "description": "Find semantically relevant posts for internal linking. Uses AI to filter out unrelated posts. Returns only high-quality link targets with anchor patterns.",
+        "description": "Find semantically relevant posts for internal linking. Uses AI to filter out unrelated posts. Returns suggestions with anchor_patterns (phrases to link), anti_patterns (phrases to avoid), and semantic_intent.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1587,7 +1955,7 @@ BACKFILL_LINK_TOOLS = [
     },
     {
         "name": "get_internal_link_suggestions",
-        "description": "Find semantically relevant posts for internal linking. Uses AI to filter out unrelated posts - only returns high-quality, topically relevant link targets.",
+        "description": "Find semantically relevant posts for internal linking. Uses AI to filter out unrelated posts. Returns suggestions with anchor_patterns (phrases to link), anti_patterns (phrases to avoid), and semantic_intent.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1630,7 +1998,7 @@ BACKFILL_LINK_TOOLS = [
     },
     {
         "name": "apply_link_insertions",
-        "description": "Safely add links with context validation. Verifies anchor text is used appropriately in context before linking. Include target_title for each insertion to enable validation.",
+        "description": "Safely add links with semantic validation. Verifies anchor text meaning matches target article before linking. Include target_title and anti_patterns for best results.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1640,13 +2008,14 @@ BACKFILL_LINK_TOOLS = [
                 },
                 "insertions": {
                     "type": "array",
-                    "description": "List of links to add. Include target_title for context validation.",
+                    "description": "List of links to add. Include target_title and anti_patterns for semantic validation.",
                     "items": {
                         "type": "object",
                         "properties": {
                             "anchor_text": {"type": "string", "description": "Exact text to wrap in a link"},
                             "url": {"type": "string", "description": "URL for the link (e.g., /blog/post-slug)"},
                             "target_title": {"type": "string", "description": "Title of target article (enables context validation)"},
+                            "anti_patterns": {"type": "array", "items": {"type": "string"}, "description": "Phrases to avoid linking (from suggestion's anti_patterns)"},
                             "block_id": {"type": "string", "description": "Optional: target specific block by ID"}
                         },
                         "required": ["anchor_text", "url", "target_title"]
