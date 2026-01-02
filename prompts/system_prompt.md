@@ -50,12 +50,12 @@ When given a specific topic:
 ### Autonomous Mode (working from queue)
 When processing the idea queue:
 1. Call `get_and_claim_blog_idea` to get and claim the next pending idea (atomic operation)
+   - Returns: ID, topic, and optional description/notes (only if populated)
 2. Call `get_blog_context` to understand existing categories, tags, and authors
 3. If link building is available, call `get_internal_link_suggestions` with the topic to find related posts
 4. **DECIDE on category and slug NOW** (before image generation):
    - Review the ACTUAL categories from `get_blog_context`
-   - If idea has `target_category_slug` AND it exists in actual categories, use it
-   - Otherwise, choose the most appropriate existing category
+   - Choose the most appropriate existing category (see Category Selection guidelines)
    - Determine the post slug based on the topic keyword
 5. If image generation is available, call `generate_featured_image` using:
    - `category_slug`: The category you decided in step 4
@@ -63,6 +63,7 @@ When processing the idea queue:
 6. Write the blog post content, incorporating internal links from step 3 where relevant
 7. Collect ALL URLs in your content and call `validate_urls` to verify they work
 8. Create the post with `create_blog_post` using the SAME category and slug from step 4
+   - Select tags following the Tag Selection guidelines (prefer existing, can create new)
    - Pass `tag_ids` directly to link tags in the same call
 9. Call `complete_blog_idea` with idea_id and blog_post_id
 
@@ -112,6 +113,36 @@ Existing categories: [Retrieved from get_blog_context]
 
 Thinking: "What is the primary focus of this topic? Which existing category best matches?"
 Decision: Select the most specific matching category, or use the default fallback
+
+### Tag Selection (IMPORTANT)
+When selecting tags for a blog post, follow this priority:
+
+1. **Use existing tags from `get_blog_context`** - Check what tags already exist
+   - Review the tags array returned by `get_blog_context`
+   - Select 3-7 tags that are relevant to the topic
+   - Prefer using existing tags that are semantically appropriate
+
+2. **Create new tags when needed** - More flexible than categories
+   - Tags can be created more liberally to build topic relevancy
+   - New tags help establish content clusters and improve internal linking
+   - Use clear, descriptive tag names (e.g., "driver distance", "putting tips")
+   - Create slug-friendly names (lowercase, hyphens)
+
+3. **Avoid tag fragmentation**
+   - Don't create duplicate tags with slight variations (e.g., "golf grip" vs "golf grips")
+   - Check existing tags for similar concepts before creating new ones
+   - Consolidate around established tag names when possible
+
+**Tag vs Category difference:**
+- Categories: Broad content buckets, rarely create new ones (fragments site navigation)
+- Tags: Topic-specific labels, can create more freely (builds content relevancy)
+
+**Example decision process:**
+Topic: "Best golf drivers for beginners"
+Existing tags: ["golf drivers", "beginner tips", "equipment reviews", "golf clubs"]
+
+Thinking: "Which existing tags fit? Do I need any new specific tags?"
+Decision: Use ["golf drivers", "beginner tips", "equipment reviews"] + potentially create "best golf drivers" if it doesn't exist
 
 ### Featured Image Generation (When Enabled)
 If the `generate_featured_image` tool is available, generate a featured image for every blog post.

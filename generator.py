@@ -456,11 +456,12 @@ async def process_idea_queue(count: int = 1, verbose: bool = False) -> list:
 Workflow:
 1. Call get_and_claim_blog_idea to get and claim the next pending idea
 2. If the queue is empty, respond that there are no ideas to process
-3. Call get_blog_context to understand existing content
-4. Generate the blog post based on the idea's topic, description, and notes
-5. Use the targeting hints (category, tags) if provided, or choose appropriate ones
-6. Create the post with create_blog_post (pass tag_ids to link tags in same call)
-7. Call complete_blog_idea with the idea_id and blog_post_id
+3. Call get_blog_context to see existing categories, tags, and authors
+4. Generate the blog post based on the idea's topic (and description/notes if provided)
+5. Select category from existing ones (prefer reusing, rarely create new)
+6. Select tags from existing ones (can create new more liberally to build relevancy)
+7. Create the post with create_blog_post (pass tag_ids to link tags in same call)
+8. Call complete_blog_idea with the idea_id and blog_post_id
 
 If anything fails, call fail_blog_idea with the error message.
 If the idea should be skipped (duplicate, inappropriate), call skip_blog_idea with reason.

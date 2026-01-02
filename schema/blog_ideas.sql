@@ -13,14 +13,9 @@ CREATE TABLE IF NOT EXISTS public.blog_ideas (
   description text,                        -- Optional longer description of what to cover
   notes text,                              -- Any additional notes/guidance for the AI
 
-  -- Targeting (optional hints for the AI)
-  target_category_slug text,               -- Suggested category slug
-  suggested_tags text[],                   -- Suggested tag slugs
-  target_word_count integer,               -- Target word count (default ~1500)
-
-  -- Priority & ordering
+  -- Priority & ordering (NULL for completed/failed/skipped items)
   priority integer DEFAULT 50              -- 0-100, higher = do first
-    CHECK (priority >= 0 AND priority <= 100),
+    CHECK (priority IS NULL OR (priority >= 0 AND priority <= 100)),
 
   -- Status tracking
   status text NOT NULL DEFAULT 'pending'
@@ -39,7 +34,6 @@ CREATE TABLE IF NOT EXISTS public.blog_ideas (
   -- Metadata
   source text DEFAULT 'manual'             -- Where idea came from
     CHECK (source IN ('manual', 'ai_suggested', 'trending', 'user_request', 'content_gap')),
-  created_by text,                         -- Who added this idea
 
   -- Constraints
   CONSTRAINT blog_ideas_pkey PRIMARY KEY (id),
@@ -53,17 +47,12 @@ CREATE TABLE IF NOT EXISTS public.blog_ideas (
 
 -- Primary query: Get next pending idea by priority
 CREATE INDEX IF NOT EXISTS idx_blog_ideas_pending_priority
-  ON public.blog_ideas(status, priority DESC, created_at ASC)
+  ON public.blog_ideas(status, priority DESC NULLS LAST, created_at ASC)
   WHERE status = 'pending';
 
 -- Find ideas by status
 CREATE INDEX IF NOT EXISTS idx_blog_ideas_status
   ON public.blog_ideas(status);
-
--- Find ideas by category
-CREATE INDEX IF NOT EXISTS idx_blog_ideas_category
-  ON public.blog_ideas(target_category_slug)
-  WHERE target_category_slug IS NOT NULL;
 
 -- =============================================================================
 -- Row Level Security (RLS)
@@ -88,9 +77,6 @@ RETURNS TABLE (
   topic text,
   description text,
   notes text,
-  target_category_slug text,
-  suggested_tags text[],
-  target_word_count integer,
   priority integer
 )
 LANGUAGE sql
@@ -101,13 +87,10 @@ AS $$
     topic,
     description,
     notes,
-    target_category_slug,
-    suggested_tags,
-    target_word_count,
     priority
   FROM public.blog_ideas
   WHERE status = 'pending'
-  ORDER BY priority DESC, created_at ASC
+  ORDER BY priority DESC NULLS LAST, created_at ASC
   LIMIT 1;
 $$;
 

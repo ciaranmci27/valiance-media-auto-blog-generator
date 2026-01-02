@@ -26,12 +26,12 @@ async def get_and_claim_blog_idea(args: dict[str, Any]) -> dict[str, Any]:
         async with aiohttp.ClientSession() as session:
             headers = get_supabase_headers()
 
-            # Get the next pending idea by priority
+            # Get the next pending idea by priority (simplified schema)
             async with session.get(
                 f"{SUPABASE_URL}/rest/v1/blog_ideas"
                 f"?status=eq.pending"
-                f"&select=id,topic,description,notes,target_category_slug,suggested_tags,target_word_count,priority"
-                f"&order=priority.desc,created_at.asc"
+                f"&select=id,topic,description,notes,priority"
+                f"&order=priority.desc.nullslast,created_at.asc"
                 f"&limit=1",
                 headers=headers
             ) as resp:
@@ -68,12 +68,27 @@ async def get_and_claim_blog_idea(args: dict[str, Any]) -> dict[str, Any]:
                         "is_error": True
                     }
 
-            # Build concise response
-            tags = ', '.join(idea.get('suggested_tags') or []) or 'none'
+            # Build concise response - only include description/notes if populated
+            response_lines = [
+                f"ID: {idea_id}",
+                f"Topic: {idea['topic']}"
+            ]
+
+            # Only add description/notes if they have actual content (not null/empty)
+            description = idea.get('description')
+            if description and description.strip():
+                response_lines.append(f"Description: {description}")
+
+            notes = idea.get('notes')
+            if notes and notes.strip():
+                response_lines.append(f"Notes: {notes}")
+
+            response_lines.append("Status: CLAIMED")
+
             return {
                 "content": [{
                     "type": "text",
-                    "text": f"ID: {idea_id}\nTopic: {idea['topic']}\nDescription: {idea.get('description') or 'none'}\nNotes: {idea.get('notes') or 'none'}\nCategory: {idea.get('target_category_slug') or 'choose'}\nTags: {tags}\nWords: {idea.get('target_word_count') or 1500}\nStatus: CLAIMED"
+                    "text": "\n".join(response_lines)
                 }]
             }
 
@@ -105,7 +120,8 @@ async def complete_blog_idea(args: dict[str, Any]) -> dict[str, Any]:
                     "status": "completed",
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "blog_post_id": blog_post_id,
-                    "error_message": None
+                    "error_message": None,
+                    "priority": None
                 }
             ) as resp:
                 if resp.status in [200, 204]:
@@ -133,7 +149,7 @@ async def fail_blog_idea(args: dict[str, Any]) -> dict[str, Any]:
             async with session.patch(
                 f"{SUPABASE_URL}/rest/v1/blog_ideas?id=eq.{idea_id}",
                 headers=headers,
-                json={"status": "failed", "error_message": error_message}
+                json={"status": "failed", "error_message": error_message, "priority": None}
             ) as resp:
                 if resp.status in [200, 204]:
                     return {"content": [{"type": "text", "text": f"Failed: {idea_id} - {error_message}"}]}
@@ -162,7 +178,8 @@ async def skip_blog_idea(args: dict[str, Any]) -> dict[str, Any]:
                 json={
                     "status": "skipped",
                     "error_message": reason,
-                    "completed_at": datetime.now(timezone.utc).isoformat()
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "priority": None
                 }
             ) as resp:
                 if resp.status in [200, 204]:
@@ -252,7 +269,7 @@ async def get_idea_queue_status(args: dict[str, Any]) -> dict[str, Any]:
 IDEA_TOOLS = [
     {
         "name": "get_and_claim_blog_idea",
-        "description": "Get next pending idea and claim it atomically. Returns idea details with status CLAIMED. Call this first in autonomous mode.",
+        "description": "Get next pending idea and claim it atomically. Returns ID, topic, and optional description/notes (only if populated). Call this first in autonomous mode.",
         "input_schema": {
             "type": "object",
             "properties": {},
