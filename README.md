@@ -67,6 +67,20 @@ See [Database Setup](docs/database-setup.md) for full details.
 
 ### 4. Add Ideas to Queue
 
+**Option A: Web Tool (Recommended)**
+
+Use the [Blog Ideas Refiner](https://blog-ideas.valiancemedia.com) — a simple web app that lets you:
+- Paste ideas in any format (bullet points, numbered lists, plain text)
+- Automatically remove duplicates and similar topics
+- Check against your existing ideas to avoid repeats
+- Preview everything before adding to your database
+
+No coding required. Just paste your ideas, enter your Supabase credentials, and click upload.
+
+**Option B: Direct SQL**
+
+For developers, you can insert ideas directly:
+
 ```sql
 INSERT INTO blog_ideas (topic, description, priority) VALUES
   ('Your Topic Here', 'Guidance for the AI', 90);
