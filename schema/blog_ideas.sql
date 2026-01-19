@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS public.blog_ideas (
   notes text,                              -- Any additional notes/guidance for the AI
 
   -- Priority & ordering (NULL for completed/failed/skipped items)
-  priority integer DEFAULT 50              -- 0-100, higher = do first
-    CHECK (priority IS NULL OR (priority >= 0 AND priority <= 100)),
+  priority integer DEFAULT 50              -- 0-999, higher = do first
+    CHECK (priority IS NULL OR (priority >= 0 AND priority <= 999)),
 
   -- Status tracking
   status text NOT NULL DEFAULT 'pending'
