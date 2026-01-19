@@ -144,8 +144,9 @@ python generator.py --shopify-sync-all
 # Check sync status
 python generator.py --shopify-status
 
-# Import existing Shopify blogs into Supabase
-python generator.py --shopify-import-categories
+# Import existing Shopify content into Supabase
+python generator.py --shopify-import-all
+python generator.py --shopify-import-post "article-slug"
 ```
 
 See [Getting Started with Shopify](docs/setup/shopify/getting-started-with-shopify.md) for setup instructions.

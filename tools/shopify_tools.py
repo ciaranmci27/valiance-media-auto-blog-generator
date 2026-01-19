@@ -223,7 +223,15 @@ def render_blocks_to_html(blocks: list) -> str:
             continue
 
         block_type = block.get('type', '')
+
+        # Handle two block formats:
+        # 1. Standard format: {"type": "paragraph", "data": {"text": "..."}}
+        # 2. Import format: {"type": "html", "content": "..."}
         data = block.get('data', {})
+
+        # For imported HTML blocks, content is directly on block, not in 'data'
+        if block_type == 'html' and not data:
+            data = {'content': block.get('content', '')}
 
         try:
             rendered = render_block(block_type, data, blocks)
@@ -278,6 +286,11 @@ def render_block(block_type: str, data: dict, all_blocks: list = None) -> str:
         return render_divider(data)
     elif block_type == 'widget':
         return render_widget(data)
+    elif block_type == 'html':
+        # Raw HTML block - used by imports from Shopify
+        # Content may be in data['html'] or data['content'] depending on source
+        html_content = data.get('html') or data.get('content', '')
+        return html_content if html_content else ''
     else:
         return ''
 
@@ -832,6 +845,66 @@ def build_seo_metafields(seo_data: dict) -> list:
     return metafields
 
 
+async def set_resource_metafields(owner_id: str, metafields: list) -> dict:
+    """
+    Set metafields on a Shopify resource using metafieldsSet mutation.
+
+    This works for blogs, articles, products, collections, etc.
+
+    Args:
+        owner_id: The GID of the resource (e.g., "gid://shopify/Blog/123")
+        metafields: List of metafield dicts with namespace, key, value, type
+
+    Returns:
+        dict with success status and any errors
+    """
+    if not metafields:
+        return {"success": True}
+
+    # Add ownerId to each metafield
+    metafields_input = []
+    for mf in metafields:
+        metafields_input.append({
+            "ownerId": owner_id,
+            "namespace": mf["namespace"],
+            "key": mf["key"],
+            "value": mf["value"],
+            "type": mf["type"],
+        })
+
+    query = """
+    mutation SetMetafields($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+            metafields {
+                id
+                namespace
+                key
+            }
+            userErrors {
+                code
+                field
+                message
+            }
+        }
+    }
+    """
+
+    variables = {"metafields": metafields_input}
+    result = await execute_shopify_graphql(query, variables)
+
+    if "error" in result:
+        return {"success": False, "error": result["error"]}
+
+    set_result = result.get("metafieldsSet", {})
+    user_errors = set_result.get("userErrors", [])
+
+    if user_errors:
+        error_msg = "; ".join([e.get("message", str(e)) for e in user_errors])
+        return {"success": False, "error": error_msg}
+
+    return {"success": True, "metafields": set_result.get("metafields", [])}
+
+
 # =============================================================================
 # SHOPIFY GRAPHQL API HELPERS
 # =============================================================================
@@ -1015,9 +1088,8 @@ async def fetch_all_shopify_articles() -> list:
                             id
                             title
                             handle
-                            contentHtml
-                            excerpt
-                            excerptHtml
+                            body
+                            summary
                             publishedAt
                             tags
                             blog {{
@@ -1029,13 +1101,6 @@ async def fetch_all_shopify_articles() -> list:
                                 url
                                 altText
                             }}
-                            author {{
-                                name
-                            }}
-                            seo {{
-                                title
-                                description
-                            }}
                         }}
                     }}
                 }}
@@ -1045,10 +1110,12 @@ async def fetch_all_shopify_articles() -> list:
             result = await execute_shopify_graphql(query)
 
             if "error" in result:
+                print(f"  [WARN] Failed to fetch articles from blog '{blog_handle}': {result['error']}")
                 break
 
             blog_data = result.get("blog", {})
             if not blog_data:
+                print(f"  [WARN] No data returned for blog '{blog_handle}' - may have been deleted")
                 break
 
             articles_data = blog_data.get("articles", {})
@@ -1160,6 +1227,40 @@ async def find_article_by_handle(blog_gid: str, handle: str) -> Optional[str]:
     return None
 
 
+async def fetch_article_content_length(article_gid: str) -> Optional[int]:
+    """
+    Fetch the body content length of an existing Shopify article.
+
+    Used for safety checks before overwriting - we should never overwrite
+    a longer article with shorter content.
+
+    Args:
+        article_gid: Shopify article GID
+
+    Returns:
+        Length of article body in characters, or None if fetch failed
+    """
+    query = """
+    query GetArticleBody($id: ID!) {
+        article(id: $id) {
+            id
+            body
+        }
+    }
+    """
+    result = await execute_shopify_graphql(query, {"id": article_gid})
+
+    if "error" in result:
+        return None
+
+    article = result.get("article")
+    if article:
+        body = article.get("body", "") or ""
+        return len(body.strip())
+
+    return None
+
+
 def clear_sync_cache():
     """Clear the in-memory sync cache. Call at start of sync operations."""
     global _blog_cache, _article_cache
@@ -1201,16 +1302,14 @@ async def sync_category_to_shopify(
             # Blog already exists - update it instead of creating duplicate
             pass
 
-    # Build blog input
+    # Build blog input (metafields are set separately - not supported inline)
     blog_input = {
         "title": name,
         "handle": slug,
     }
 
-    # Add SEO metafields if provided
+    # Build SEO metafields (will be set after create/update)
     metafields = build_seo_metafields(seo)
-    if metafields:
-        blog_input["metafields"] = metafields
 
     if existing_blog_gid:
         # Update existing blog
@@ -1263,11 +1362,17 @@ async def sync_category_to_shopify(
             else:
                 blog = update_result.get("blog", {})
                 if blog:
+                    blog_gid = blog.get("id")
                     # Cache the result
-                    _blog_cache[slug] = blog.get("id")
+                    _blog_cache[slug] = blog_gid
+                    # Set metafields separately (not supported inline for blogs)
+                    if metafields:
+                        mf_result = await set_resource_metafields(blog_gid, metafields)
+                        if not mf_result.get("success"):
+                            print(f" [WARN] Metafields failed: {mf_result.get('error')}")
                     return {
                         "success": True,
-                        "shopify_blog_gid": blog.get("id"),
+                        "shopify_blog_gid": blog_gid,
                         "handle": blog.get("handle"),
                     }
 
@@ -1298,11 +1403,17 @@ async def sync_category_to_shopify(
             return {"success": False, "error": error_msg}
 
         blog = create_result.get("blog", {})
+        blog_gid = blog.get("id")
         # Cache the result
-        _blog_cache[slug] = blog.get("id")
+        _blog_cache[slug] = blog_gid
+        # Set metafields separately (not supported inline for blogs)
+        if metafields:
+            mf_result = await set_resource_metafields(blog_gid, metafields)
+            if not mf_result.get("success"):
+                print(f" [WARN] Metafields failed: {mf_result.get('error')}")
         return {
             "success": True,
-            "shopify_blog_gid": blog.get("id"),
+            "shopify_blog_gid": blog_gid,
             "handle": blog.get("handle"),
         }
 
@@ -1357,6 +1468,45 @@ async def sync_post_to_shopify(
     # Render content blocks to HTML
     body_html = render_blocks_to_html(content)
 
+    # DEBUG: Log content rendering for troubleshooting
+    print(f"    [DEBUG] Content blocks: {len(content) if content else 0} blocks")
+    if content and len(content) > 0:
+        print(f"    [DEBUG] First block type: {content[0].get('type', 'unknown')}")
+        print(f"    [DEBUG] First block keys: {list(content[0].keys()) if content else 'none'}")
+    print(f"    [DEBUG] Rendered HTML length: {len(body_html)} chars")
+
+    # ==========================================================================
+    # SAFETY CHECKS: Prevent accidental data loss
+    # ==========================================================================
+    new_content_length = len(body_html.strip()) if body_html else 0
+
+    # Safety Check 1: Never overwrite with empty/minimal content
+    if new_content_length < 50 and existing_shopify_id:
+        return {
+            "success": False,
+            "error": f"SAFETY BLOCK: Refusing to overwrite existing Shopify article with empty/minimal content. "
+                     f"New content: {new_content_length} chars (minimum 50 required). "
+                     f"This protection prevents accidental data loss.",
+        }
+
+    # Safety Check 2: Never overwrite longer content with shorter content
+    # This is the CRITICAL check that prevents the disaster scenario
+    if existing_shopify_id:
+        existing_content_length = await fetch_article_content_length(existing_shopify_id)
+        if existing_content_length is not None:
+            # Allow overwrite only if new content is at least 80% of existing length
+            # This prevents replacing a 5000 char article with a 100 char one
+            min_acceptable_length = int(existing_content_length * 0.8)
+            if new_content_length < min_acceptable_length and existing_content_length > 100:
+                return {
+                    "success": False,
+                    "error": f"SAFETY BLOCK: Refusing to overwrite Shopify article with significantly shorter content. "
+                             f"Existing: {existing_content_length} chars, New: {new_content_length} chars. "
+                             f"New content must be at least 80% of existing length ({min_acceptable_length} chars). "
+                             f"This protection prevents accidental data loss from bad imports.",
+                }
+    # ==========================================================================
+
     # Get publish settings based on status
     publish_settings = get_shopify_publish_settings(status, scheduled_at)
 
@@ -1365,9 +1515,13 @@ async def sync_post_to_shopify(
         "title": title,
         "handle": slug,
         "body": body_html,
-        "summary": excerpt,
         "isPublished": publish_settings.get("isPublished", False),
     }
+
+    # Only include summary if we have a real excerpt (not empty/placeholder)
+    # This preserves existing Shopify excerpts when Supabase has none
+    if excerpt and excerpt.strip() and excerpt != "No excerpt available.":
+        article_input["summary"] = excerpt
 
     # Add publishDate if present (for scheduled posts)
     if "publishDate" in publish_settings:
@@ -1380,11 +1534,16 @@ async def sync_post_to_shopify(
         article_input["author"] = {"name": SHOPIFY_DEFAULT_AUTHOR}
 
     # Add featured image
-    if featured_image:
+    # Skip Shopify CDN URLs - they're already hosted on Shopify, no need to re-upload
+    # Re-uploading them causes "file not found" errors and can remove existing images
+    if featured_image and "cdn.shopify.com" not in featured_image:
         article_input["image"] = {
             "url": featured_image,
             "altText": featured_image_alt or f"Featured image for {title}",
         }
+    elif featured_image and "cdn.shopify.com" in featured_image:
+        # Image is already on Shopify - don't include in update to preserve existing
+        pass
 
     # Add tags
     if tags:

@@ -234,6 +234,12 @@ async def sync_all_categories(force: bool = False) -> dict:
         existing_gid = cat.get('shopify_blog_gid')
         seo = cat.get('seo')  # SEO data from Supabase
 
+        # Debug: Show SEO data being synced
+        if seo and isinstance(seo, dict) and any(seo.values()):
+            print(f"  [DEBUG] SEO data for {name}: {seo}")
+        elif seo:
+            print(f"  [DEBUG] SEO data type: {type(seo)}, value: {seo}")
+
         # Skip if already synced and not forcing
         if existing_gid and not force:
             print(f"  [SKIP] {name} - already synced")
@@ -1216,8 +1222,8 @@ async def import_posts_from_shopify(force_pull: bool = False) -> dict:
         gid = article.get("id", "")
         handle = article.get("handle", "")
         title = article.get("title", "")
-        content_html = article.get("contentHtml", "")
-        excerpt = article.get("excerpt", "") or ""
+        content_html = article.get("body", "")  # 'body' is the field name in Admin API
+        excerpt = article.get("summary", "") or ""  # 'summary' is the field name in Admin API
         published_at = article.get("publishedAt", "")
         tags = article.get("tags", [])
 
@@ -1228,13 +1234,21 @@ async def import_posts_from_shopify(force_pull: bool = False) -> dict:
         slug = handle
 
         # Clean up excerpt
-        if len(excerpt) > 300:
+        # Truncate long excerpts, but don't set placeholder text
+        # Empty excerpts should stay empty to avoid overwriting Shopify data
+        if excerpt and len(excerpt) > 300:
             excerpt = excerpt[:297] + "..."
-        if not excerpt:
-            excerpt = "No excerpt available."
 
         # Store HTML content as a single HTML block
         content_blocks = [{"type": "html", "content": content_html}] if content_html else []
+
+        # SAFETY CHECK: Validate content is not empty before proceeding
+        content_length = len(content_html.strip()) if content_html else 0
+        if content_length < 50:
+            print(f"  [SKIP] {title[:50]}... ({slug}) - empty/minimal content ({content_length} chars)")
+            errors.append(f"Skipped {slug}: empty content from Shopify ({content_length} chars)")
+            skipped += 1
+            continue
 
         # Get featured image
         image_data = article.get("image", {})
@@ -1289,10 +1303,17 @@ async def import_posts_from_shopify(force_pull: bool = False) -> dict:
 
                 success = await _update_post_supabase(existing["id"], update_data)
                 if success:
-                    # Update tag relations
-                    await _delete_post_tag_relations(existing["id"])
-                    await _create_post_tag_relations(existing["id"], supabase_tag_ids)
-                    print(f"  [UPDATE] {title[:50]}... ({slug})")
+                    # Update tag relations - SAFETY: only modify tags if we have tags to set
+                    # This prevents accidental tag deletion when import fails to resolve tags
+                    if supabase_tag_ids:
+                        await _delete_post_tag_relations(existing["id"])
+                        await _create_post_tag_relations(existing["id"], supabase_tag_ids)
+                        tag_info = f" [{len(supabase_tag_ids)} tags]"
+                    else:
+                        # Don't delete existing tags if we have no new tags
+                        # This is safer - preserves existing data
+                        tag_info = " [tags preserved]"
+                    print(f"  [UPDATE] {title[:50]}... ({slug}){tag_info}")
                     updated += 1
                 else:
                     errors.append(f"Failed to update {slug}")
@@ -1350,6 +1371,168 @@ async def import_posts_from_shopify(force_pull: bool = False) -> dict:
         "skipped": skipped,
         "errors": errors,
     }
+
+
+async def import_single_post_from_shopify(slug: str) -> bool:
+    """
+    Import a single post from Shopify into Supabase by slug/handle.
+
+    This always overwrites existing data - it's meant for pulling fresh
+    content from Shopify to fix issues or restore content.
+
+    Prerequisites:
+    - Import categories first with --shopify-import-categories
+    - Import tags first with --shopify-import-tags (optional but recommended)
+
+    Args:
+        slug: The article handle (slug) to import
+
+    Returns:
+        True if successful, False otherwise
+    """
+    print(f"Fetching article '{slug}' from Shopify...")
+
+    # Fetch all articles and find the one we want
+    articles = await fetch_all_shopify_articles()
+
+    if not articles:
+        print("Error: Could not fetch articles from Shopify.")
+        return False
+
+    # Find the article by handle
+    article = None
+    for a in articles:
+        if a.get("handle") == slug:
+            article = a
+            break
+
+    if not article:
+        print(f"Error: Article with slug '{slug}' not found in Shopify.")
+        available = [a.get("handle", "?") for a in articles[:10]]
+        print(f"Available slugs: {', '.join(available)}")
+        if len(articles) > 10:
+            print(f"  ... and {len(articles) - 10} more")
+        return False
+
+    # Extract article data
+    gid = article.get("id", "")
+    handle = article.get("handle", "")
+    title = article.get("title", "")
+    content_html = article.get("body", "")
+    excerpt = article.get("summary", "") or ""
+    published_at = article.get("publishedAt", "")
+    tags = article.get("tags", [])
+
+    # Clean up excerpt (truncate if too long, but don't add placeholder)
+    if excerpt and len(excerpt) > 300:
+        excerpt = excerpt[:297] + "..."
+
+    # Store HTML content as a single HTML block
+    content_blocks = [{"type": "html", "content": content_html}] if content_html else []
+
+    # SAFETY CHECK: Validate content
+    content_length = len(content_html.strip()) if content_html else 0
+    if content_length < 50:
+        print(f"Error: Shopify article has empty/minimal content ({content_length} chars)")
+        print("This may indicate the article doesn't exist or has no body content.")
+        return False
+
+    print(f"Found article: {title}")
+    print(f"  Content: {content_length} chars")
+
+    # Get featured image
+    image_data = article.get("image", {})
+    featured_image = image_data.get("url") if image_data else None
+    featured_image_alt = image_data.get("altText") if image_data else None
+
+    # Resolve category (blog)
+    blog_data = article.get("blog", {})
+    blog_gid = blog_data.get("id") if blog_data else None
+    category_id = None
+    if blog_gid:
+        cat = await _get_category_by_shopify_gid(blog_gid)
+        if cat:
+            category_id = cat["id"]
+            print(f"  Category: {cat.get('name', '?')}")
+        else:
+            print(f"  Warning: Blog {blog_gid} not found in Supabase. Run --shopify-import-categories first.")
+
+    # Resolve tags
+    supabase_tag_ids = []
+    for tag_name in tags:
+        tag = await _get_tag_by_name_supabase(tag_name)
+        if tag:
+            supabase_tag_ids.append(tag["id"])
+    print(f"  Tags: {len(tags)} in Shopify, {len(supabase_tag_ids)} matched in Supabase")
+
+    # Get default author
+    default_author_id = await _get_default_author_id()
+
+    # Check if post already exists in Supabase
+    existing = await _get_post_by_slug_supabase(slug)
+
+    if existing:
+        print(f"  Updating existing Supabase post...")
+
+        update_data = {
+            "title": title,
+            "excerpt": excerpt,
+            "content": content_blocks,
+            "status": "published" if published_at else "draft",
+            "featured_image": featured_image,
+            "featured_image_alt": featured_image_alt,
+            "category_id": category_id,
+            "shopify_article_id": gid,
+            "shopify_synced_at": datetime.utcnow().isoformat(),
+            "shopify_sync_error": None,
+        }
+
+        success = await _update_post_supabase(existing["id"], update_data)
+        if success:
+            # Update tag relations if we have tags
+            if supabase_tag_ids:
+                await _delete_post_tag_relations(existing["id"])
+                await _create_post_tag_relations(existing["id"], supabase_tag_ids)
+                tag_info = f" with {len(supabase_tag_ids)} tags"
+            else:
+                tag_info = " (tags preserved)"
+            print(f"  [SUCCESS] Updated '{title}'{tag_info}")
+            return True
+        else:
+            print(f"  [FAILED] Could not update post in Supabase")
+            return False
+    else:
+        print(f"  Creating new Supabase post...")
+
+        insert_data = {
+            "slug": slug,
+            "title": title,
+            "excerpt": excerpt,
+            "content": content_blocks,
+            "status": "published" if published_at else "draft",
+            "featured_image": featured_image,
+            "featured_image_alt": featured_image_alt,
+            "author_id": default_author_id,
+            "category_id": category_id,
+            "shopify_article_id": gid,
+            "shopify_synced_at": datetime.utcnow().isoformat(),
+        }
+
+        if published_at:
+            try:
+                insert_data["created_at"] = published_at
+            except Exception:
+                pass
+
+        success, error_msg, new_post_id = await _insert_post_supabase(insert_data)
+        if success and new_post_id:
+            await _create_post_tag_relations(new_post_id, supabase_tag_ids)
+            tag_info = f" with {len(supabase_tag_ids)} tags" if supabase_tag_ids else ""
+            print(f"  [SUCCESS] Imported '{title}'{tag_info}")
+            return True
+        else:
+            print(f"  [FAILED] Could not create post: {error_msg}")
+            return False
 
 
 async def import_all_from_shopify(force_pull: bool = False) -> dict:

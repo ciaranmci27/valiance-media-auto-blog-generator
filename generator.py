@@ -1302,6 +1302,12 @@ Examples:
         help="Sync the N most recently updated posts to Shopify"
     )
     shopify_group.add_argument(
+        "--shopify-sync-slugs",
+        type=str,
+        metavar="SLUGS",
+        help="Sync multiple posts by comma-separated slugs (skips missing, shows summary)"
+    )
+    shopify_group.add_argument(
         "--shopify-sync-categories",
         action="store_true",
         help="Sync all categories to Shopify Blogs"
@@ -1336,6 +1342,12 @@ Examples:
         "--shopify-import-posts",
         action="store_true",
         help="Import posts (articles) from Shopify into Supabase"
+    )
+    shopify_group.add_argument(
+        "--shopify-import-post",
+        type=str,
+        metavar="SLUG",
+        help="Import a single post from Shopify by slug (overwrites Supabase data)"
     )
     shopify_group.add_argument(
         "--shopify-import-all",
@@ -1480,6 +1492,20 @@ Examples:
         if not ENABLE_SHOPIFY_SYNC:
             print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
             sys.exit(1)
+        # SAFETY: Require confirmation for bulk sync operations
+        print("\n" + "=" * 60)
+        print("WARNING: BULK SHOPIFY SYNC (Supabase -> Shopify)")
+        print("=" * 60)
+        print("This will push posts from Supabase TO Shopify.")
+        if args.force:
+            print("--force flag: Will re-sync even up-to-date posts.")
+        print("\nSafety checks prevent overwriting longer Shopify content")
+        print("with shorter Supabase content.")
+        print("=" * 60)
+        confirm = input("\nType 'yes' to continue: ")
+        if confirm.lower() != 'yes':
+            print("Aborted.")
+            sys.exit(0)
         from tools.shopify_sync import sync_all_posts
         result = asyncio.run(sync_all_posts(force=args.force))
         print(f"\nSynced: {result['synced']} | Failed: {result['failed']} | Skipped: {result['skipped']}")
@@ -1491,6 +1517,59 @@ Examples:
         from tools.shopify_sync import sync_recent
         result = asyncio.run(sync_recent(args.shopify_sync_recent, force=args.force))
         print(f"\nSynced: {result['synced']} | Failed: {result['failed']} | Skipped: {result['skipped']}")
+
+    elif args.shopify_sync_slugs:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import sync_post_by_slug, get_post_by_slug
+
+        # Parse comma-separated slugs
+        slugs = [s.strip() for s in args.shopify_sync_slugs.split(",") if s.strip()]
+
+        if not slugs:
+            print("No slugs provided")
+            sys.exit(1)
+
+        print(f"Syncing {len(slugs)} posts to Shopify...\n")
+
+        synced = []
+        failed = []
+        not_found = []
+
+        for slug in slugs:
+            # First check if post exists
+            post = asyncio.run(get_post_by_slug(slug))
+            if not post:
+                print(f"Post not found: {slug}")
+                not_found.append(slug)
+                continue
+
+            success = asyncio.run(sync_post_by_slug(slug, force=args.force))
+            if success:
+                synced.append(slug)
+            else:
+                failed.append(slug)
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("SYNC SUMMARY")
+        print("=" * 60)
+        print(f"Synced: {len(synced)} | Not Found: {len(not_found)} | Failed: {len(failed)}")
+
+        if not_found:
+            print(f"\nPosts not found in Supabase ({len(not_found)}):")
+            for slug in not_found:
+                print(f"  - {slug}")
+
+        if failed:
+            print(f"\nFailed to sync ({len(failed)}):")
+            for slug in failed:
+                print(f"  - {slug}")
+
+        # Exit with error only if nothing succeeded
+        if not synced and (not_found or failed):
+            sys.exit(1)
 
     elif args.shopify_status:
         if not ENABLE_SHOPIFY_SYNC:
@@ -1526,14 +1605,55 @@ Examples:
         if not ENABLE_SHOPIFY_SYNC:
             print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
             sys.exit(1)
+        # SAFETY: Require confirmation, especially with --force-pull
+        if args.force_pull:
+            print("\n" + "=" * 60)
+            print("DANGER: IMPORT WITH --force-pull (Shopify -> Supabase)")
+            print("=" * 60)
+            print("This will OVERWRITE existing Supabase posts with Shopify data!")
+            print("All post content and tags in Supabase will be replaced.")
+            print("\nThis operation can cause data loss if Shopify data is")
+            print("incomplete or corrupted.")
+            print("=" * 60)
+            confirm = input("\nType 'yes' to continue: ")
+            if confirm.lower() != 'yes':
+                print("Aborted.")
+                sys.exit(0)
         from tools.shopify_sync import import_posts_from_shopify
         result = asyncio.run(import_posts_from_shopify(force_pull=args.force_pull))
         print(f"\nImported: {result['imported']} | Updated: {result['updated']} | Skipped: {result['skipped']}")
+
+    elif args.shopify_import_post:
+        if not ENABLE_SHOPIFY_SYNC:
+            print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
+            sys.exit(1)
+        from tools.shopify_sync import import_single_post_from_shopify
+        success = asyncio.run(import_single_post_from_shopify(args.shopify_import_post))
+        if not success:
+            sys.exit(1)
 
     elif args.shopify_import_all:
         if not ENABLE_SHOPIFY_SYNC:
             print("Shopify sync is not enabled. Set ENABLE_SHOPIFY_SYNC=true in .env")
             sys.exit(1)
+        # SAFETY: Always require confirmation for bulk import
+        print("\n" + "=" * 60)
+        if args.force_pull:
+            print("DANGER: BULK IMPORT WITH --force-pull (Shopify -> Supabase)")
+        else:
+            print("WARNING: BULK IMPORT (Shopify -> Supabase)")
+        print("=" * 60)
+        print("This will import categories, tags, and posts from Shopify.")
+        if args.force_pull:
+            print("\n--force-pull flag: Will OVERWRITE existing Supabase data!")
+            print("This can cause data loss if Shopify data is incomplete.")
+        else:
+            print("\nExisting Supabase records will be SKIPPED (safe mode).")
+        print("=" * 60)
+        confirm = input("\nType 'yes' to continue: ")
+        if confirm.lower() != 'yes':
+            print("Aborted.")
+            sys.exit(0)
         from tools.shopify_sync import import_all_from_shopify
         result = asyncio.run(import_all_from_shopify(force_pull=args.force_pull))
         print(f"\n=== Shopify Import Summary ===")

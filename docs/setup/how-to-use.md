@@ -224,7 +224,14 @@ python generator.py --shopify-sync "post-slug"         # Sync by slug
 python generator.py --shopify-sync-id "uuid"           # Sync by ID
 python generator.py --shopify-sync-recent 10           # Sync 10 most recent
 python generator.py --shopify-sync-all --force         # Force re-sync all
+
+# Sync multiple posts at once (skips missing, shows summary)
+python generator.py --shopify-sync-slugs "slug-1,slug-2,slug-3" --force
 ```
+
+**Note:** `--shopify-sync-all` requires confirmation before proceeding to prevent accidental overwrites.
+
+**Tip:** Use `--shopify-sync-slugs` for batch operations - it continues on missing posts and gives a summary at the end.
 
 ### Check Sync Status
 ```bash
@@ -233,12 +240,26 @@ python generator.py --shopify-status-categories   # Category sync status
 ```
 
 ### Import from Shopify
-Import existing blogs from Shopify into Supabase categories.
+Import existing content from Shopify into Supabase.
 
 ```bash
-python generator.py --shopify-import-categories               # Import, skip existing
-python generator.py --shopify-import-categories --force-pull  # Overwrite existing
+# Import all content at once
+python generator.py --shopify-import-all                      # Categories, tags, posts
+
+# Import content types individually
+python generator.py --shopify-import-categories               # Shopify Blogs → categories
+python generator.py --shopify-import-tags                     # Extract tags from articles
+python generator.py --shopify-import-posts                    # Shopify Articles → posts
+
+# Import a single post by slug (always overwrites)
+python generator.py --shopify-import-post "article-slug"
+
+# Force overwrite existing Supabase data
+python generator.py --shopify-import-all --force-pull
+python generator.py --shopify-import-posts --force-pull
 ```
+
+**Note:** Bulk import operations (`--shopify-import-all`, `--shopify-import-posts --force-pull`) require confirmation before proceeding.
 
 ---
 

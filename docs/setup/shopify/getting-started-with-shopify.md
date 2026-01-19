@@ -97,6 +97,9 @@ python generator.py --shopify-import-all
 python generator.py --shopify-import-categories
 python generator.py --shopify-import-tags
 python generator.py --shopify-import-posts
+
+# Import a single post by slug (always overwrites Supabase data)
+python generator.py --shopify-import-post "article-slug"
 ```
 
 **With `--force-pull`**: Overwrites existing Supabase data with Shopify data:
@@ -108,6 +111,9 @@ This is useful when:
 - Setting up the generator with an existing Shopify store
 - You want Supabase to mirror your existing Shopify content
 - You made changes in Shopify and want to pull them into Supabase
+- You need to restore a specific post from Shopify (`--shopify-import-post`)
+
+**Note:** Bulk import operations require confirmation before proceeding to prevent accidental data loss.
 
 **What gets imported:**
 - **Categories**: Shopify Blogs → `blog_categories` table
@@ -142,8 +148,23 @@ python generator.py --shopify-sync-all
 python generator.py --shopify-sync "post-slug"
 python generator.py --shopify-sync-category "category-slug"
 
+# Sync multiple posts (skips missing, shows summary)
+python generator.py --shopify-sync-slugs "slug-1,slug-2,slug-3" --force
+
 # Force re-sync
 python generator.py --shopify-sync-all --force
+```
+
+### Import Commands
+```bash
+# Import all content from Shopify
+python generator.py --shopify-import-all
+
+# Import a single post by slug (overwrites Supabase)
+python generator.py --shopify-import-post "article-slug"
+
+# Force overwrite existing data
+python generator.py --shopify-import-posts --force-pull
 ```
 
 ### How Status Maps

@@ -1,188 +1,34 @@
-# Shopify SEO Theme Setup
+# Shopify SEO Setup
 
-This guide explains how to configure your Shopify theme to properly use SEO meta descriptions for blogs and articles synced from Supabase.
+Complete guide to configuring SEO for blog content synced from Supabase.
 
-## The Problem
+## Overview
 
-Shopify's GraphQL API does not support setting SEO meta descriptions for Blogs or Articles programmatically. The `seo` field that exists for Products and Collections is **not available** for blog content.
+Shopify's API doesn't support setting SEO meta descriptions for Blogs or Articles directly. This guide shows you how to configure your theme to use the synced content (excerpts, metafields) for proper SEO.
 
-| Resource | SEO via API | Solution |
-|----------|-------------|----------|
-| Products | Yes | N/A |
-| Collections | Yes | N/A |
-| **Blogs** | **No** | Metafields + Theme |
-| **Articles** | **No** | Use `summary` in Theme |
-
-## The Solution
-
-We sync the article excerpt to Shopify's `summary` field. Your theme just needs to use this as the meta description.
+| Content Type | SEO Source | What We Do |
+|--------------|------------|------------|
+| Articles | `excerpt` field | Use article excerpt as meta description |
+| Blogs (categories) | `seo` metafields | Sync SEO data from Supabase to Shopify metafields |
 
 ---
 
-## Quick Fix: Update theme.liquid
+## Quick Setup (3 Steps)
 
-The fastest fix is to update your `layout/theme.liquid` file. This is where the `<head>` section lives and where meta tags are rendered.
+### Step 1: Create Article SEO Snippet
 
-### Step 1: Open layout/theme.liquid
-
-In your Shopify theme editor, open `layout/theme.liquid`.
-
-### Step 2: Find the Existing Meta Description
-
-Search for `<meta name="description"`. You'll find something like one of these:
-
-```liquid
-{%- comment -%} Common pattern 1 {%- endcomment -%}
-<meta name="description" content="{{ page_description | escape }}">
-
-{%- comment -%} Common pattern 2 {%- endcomment -%}
-{%- if page_description -%}
-  <meta name="description" content="{{ page_description | escape }}">
-{%- endif -%}
-
-{%- comment -%} Common pattern 3 {%- endcomment -%}
-<meta name="description" content="{{ page_description | default: shop.description | escape }}">
-```
-
-### Step 3: Replace With This
-
-Replace the existing meta description tag with this code:
-
-```liquid
-{%- comment -%} SEO Meta Description - Articles use excerpt, everything else uses page_description {%- endcomment -%}
-{%- if template.name == 'article' and article.excerpt != blank -%}
-  <meta name="description" content="{{ article.excerpt | strip_html | strip_newlines | truncate: 160 | escape }}">
-{%- elsif template.name == 'blog' and blog.metafields.seo.description != blank -%}
-  <meta name="description" content="{{ blog.metafields.seo.description | strip_html | strip_newlines | truncate: 160 | escape }}">
-{%- elsif page_description != blank -%}
-  <meta name="description" content="{{ page_description | escape }}">
-{%- elsif shop.description != blank -%}
-  <meta name="description" content="{{ shop.description | escape }}">
-{%- endif -%}
-```
-
-This handles:
-- **Article pages**: Uses the excerpt (synced from Supabase)
-- **Blog pages**: Uses metafield if available
-- **Other pages**: Uses the default page_description
-- **Fallback**: Uses shop description
-
-### Step 4: Save and Test
-
-1. Save the file
-2. Visit an article page
-3. Right-click > View Page Source
-4. Search for `<meta name="description"` - you should see your excerpt
-
----
-
-## Understanding Your Theme Structure
-
-Different themes organize SEO differently. Here's where to look:
-
-| File | What's There | When to Edit |
-|------|--------------|--------------|
-| `layout/theme.liquid` | Main `<head>` section with meta tags | **Usually here** - edit the meta description tag |
-| `snippets/head-tag.liquid` | Some themes extract head content here | Check if your theme uses this |
-| `sections/main-article.liquid` | Article page content | JSON-LD structured data is often here |
-| `templates/article.liquid` | Article template (older themes) | Rarely has meta tags |
-
-### What to Look For
-
-1. **Meta description tag**: `<meta name="description"`
-2. **Open Graph description**: `<meta property="og:description"`
-3. **Twitter description**: `<meta name="twitter:description"`
-4. **JSON-LD structured data**: `<script type="application/ld+json">` with `"description":`
-
-Your **JSON-LD** (structured data) may already have the excerpt - that's separate from the meta tag and both should exist.
-
----
-
-## Blog SEO (Category Pages)
-
-Blogs (categories) don't have a summary field like articles. We use metafields to store SEO data.
-
-### How It Works
-
-When you sync categories with `--shopify-sync-categories`, the system automatically creates SEO metafields in Shopify **if** your Supabase `blog_categories` table has SEO data populated.
-
-**Required**: Your category must have the `seo` JSON field populated in Supabase:
-```json
-{
-  "title": "Your SEO Title",
-  "description": "Your meta description for this category",
-  "keywords": "keyword1, keyword2, keyword3"
-}
-```
-
-The sync creates these Shopify metafields:
-- `seo.title` - SEO title override
-- `seo.description` - Meta description
-- `seo.keywords` - Keywords (comma-separated)
-
-### Theme Configuration
-
-Add this to `sections/main-blog.liquid` or `templates/blog.liquid`:
-
-```liquid
-{%- comment -%}
-  Blog SEO Meta Description
-  Uses metafield if available, otherwise generates from first article
-{%- endcomment -%}
-
-{%- liquid
-  if blog.metafields.seo.description != blank
-    assign blog_meta_description = blog.metafields.seo.description | strip_html | strip_newlines | truncate: 160
-  elsif blog.articles.first.excerpt != blank
-    assign blog_meta_description = blog.articles.first.excerpt | strip_html | strip_newlines | truncate: 160
-  endif
--%}
-
-{%- if blog_meta_description != blank -%}
-  <meta name="description" content="{{ blog_meta_description | escape }}">
-  <meta property="og:description" content="{{ blog_meta_description | escape }}">
-  <meta name="twitter:description" content="{{ blog_meta_description | escape }}">
-{%- endif -%}
-```
-
-### Alternative: Manual Entry in Shopify
-
-If you don't have SEO data in Supabase, you can set the meta description manually in Shopify Admin:
-1. Go to **Online Store** > **Blog posts** > **Manage blogs**
-2. Click on the blog (category)
-3. Scroll to **Search engine listing**
-4. Enter your meta description
-
----
-
-## Verification
-
-After making changes:
-
-1. **View Page Source**: Visit an article page, right-click, "View Page Source", search for `<meta name="description"`
-2. **Google Rich Results Test**: Use [Google's Rich Results Test](https://search.google.com/test/rich-results) to verify your meta tags
-3. **SEO Browser Extensions**: Tools like "SEO META in 1 CLICK" can show your meta tags
-
----
-
-## Complete Example: article-seo.liquid Snippet
-
-Create `snippets/article-seo.liquid`:
+1. In Shopify Admin, go to **Online Store → Themes → Edit code**
+2. In the **Snippets** folder, click **Add a new snippet**
+3. Name it `article-seo`
+4. Paste this code:
 
 ```liquid
 {%- comment -%}
   Article SEO Snippet
-  Include this in your article template with: {% render 'article-seo', article: article %}
-
-  This outputs:
-  - Meta description (from summary/excerpt)
-  - Open Graph tags
-  - Twitter Card tags
-  - JSON-LD structured data
+  Provides: meta description, Open Graph, Twitter Cards, JSON-LD schema
 {%- endcomment -%}
 
 {%- liquid
-  # Get meta description from summary or content
   if article.excerpt != blank
     assign seo_description = article.excerpt | strip_html | strip_newlines | truncate: 160
   elsif article.content != blank
@@ -191,16 +37,14 @@ Create `snippets/article-seo.liquid`:
     assign seo_description = shop.description | truncate: 160
   endif
 
-  # Get featured image
   if article.image
     assign seo_image = article.image | image_url: width: 1200
   endif
 -%}
 
-{%- comment -%} Basic Meta {%- endcomment -%}
 <meta name="description" content="{{ seo_description | escape }}">
 
-{%- comment -%} Open Graph {%- endcomment -%}
+<meta property="og:site_name" content="{{ shop.name }}">
 <meta property="og:title" content="{{ article.title | escape }}">
 <meta property="og:description" content="{{ seo_description | escape }}">
 <meta property="og:type" content="article">
@@ -214,7 +58,6 @@ Create `snippets/article-seo.liquid`:
   <meta property="article:tag" content="{{ tag }}">
 {%- endfor -%}
 
-{%- comment -%} Twitter Card {%- endcomment -%}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ article.title | escape }}">
 <meta name="twitter:description" content="{{ seo_description | escape }}">
@@ -222,7 +65,6 @@ Create `snippets/article-seo.liquid`:
   <meta name="twitter:image" content="{{ seo_image }}">
 {%- endif -%}
 
-{%- comment -%} JSON-LD Structured Data {%- endcomment -%}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -237,11 +79,7 @@ Create `snippets/article-seo.liquid`:
   },
   "publisher": {
     "@type": "Organization",
-    "name": {{ shop.name | json }},
-    "logo": {
-      "@type": "ImageObject",
-      "url": "{{ shop.brand.logo | image_url: width: 600 }}"
-    }
+    "name": {{ shop.name | json }}
   }
   {%- if seo_image -%}
   ,"image": "{{ seo_image }}"
@@ -253,20 +91,24 @@ Create `snippets/article-seo.liquid`:
 </script>
 ```
 
+5. Click **Save**
+
 ---
 
-## Complete Example: blog-seo.liquid Snippet
+### Step 2: Create Blog SEO Snippet
 
-Create `snippets/blog-seo.liquid`:
+1. In the **Snippets** folder, click **Add a new snippet**
+2. Name it `blog-seo`
+3. Paste this code:
 
 ```liquid
 {%- comment -%}
-  Blog SEO Snippet
-  Include this in your blog template with: {% render 'blog-seo', blog: blog %}
+  Blog (Category) SEO Snippet
+  Provides: meta description, Open Graph, Twitter Cards, JSON-LD schema
+  Uses metafields synced from Supabase blog_categories.seo field
 {%- endcomment -%}
 
 {%- liquid
-  # Get meta description from metafield or first article
   if blog.metafields.seo.description != blank
     assign seo_description = blog.metafields.seo.description | strip_html | strip_newlines | truncate: 160
   elsif blog.articles.first.excerpt != blank
@@ -275,16 +117,14 @@ Create `snippets/blog-seo.liquid`:
     assign seo_description = shop.description | truncate: 160
   endif
 
-  # Get image from first article if available
   if blog.articles.first.image
     assign seo_image = blog.articles.first.image | image_url: width: 1200
   endif
 -%}
 
-{%- comment -%} Basic Meta {%- endcomment -%}
 <meta name="description" content="{{ seo_description | escape }}">
 
-{%- comment -%} Open Graph {%- endcomment -%}
+<meta property="og:site_name" content="{{ shop.name }}">
 <meta property="og:title" content="{{ blog.title | escape }}">
 <meta property="og:description" content="{{ seo_description | escape }}">
 <meta property="og:type" content="website">
@@ -293,7 +133,6 @@ Create `snippets/blog-seo.liquid`:
   <meta property="og:image" content="{{ seo_image }}">
 {%- endif -%}
 
-{%- comment -%} Twitter Card {%- endcomment -%}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ blog.title | escape }}">
 <meta name="twitter:description" content="{{ seo_description | escape }}">
@@ -301,7 +140,6 @@ Create `snippets/blog-seo.liquid`:
   <meta name="twitter:image" content="{{ seo_image }}">
 {%- endif -%}
 
-{%- comment -%} JSON-LD Structured Data {%- endcomment -%}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -317,20 +155,234 @@ Create `snippets/blog-seo.liquid`:
 </script>
 ```
 
+4. Click **Save**
+
+---
+
+### Step 3: Update meta-tags.liquid
+
+1. In the **Snippets** folder, open `meta-tags.liquid`
+2. Find the meta description section at the bottom (usually looks like):
+
+```liquid
+{% if page_description %}
+  <meta
+    name="description"
+    content="{{ page_description | escape }}"
+  >
+{% endif %}
+```
+
+3. Replace the **entire file** with this updated version:
+
+```liquid
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="view-transition" content="same-origin">
+<meta name="theme-color" content="">
+
+{%- liquid
+  assign og_title = page_title | default: shop.name
+  assign og_url = canonical_url | default: request.origin
+  assign og_type = 'website'
+  assign og_description = page_description | default: shop.description | default: shop.name
+
+  if request.page_type == 'product'
+    assign og_type = 'product'
+  elsif request.page_type == 'article'
+    assign og_type = 'article'
+  elsif request.page_type == 'password'
+    assign og_url = request.origin
+  endif
+%}
+
+<title>
+  {{ page_title }}
+  {%- if current_tags %} &ndash; tagged "{{ current_tags | join: ', ' }}"{% endif -%}
+  {%- if current_page != 1 %} &ndash; Page {{ current_page }}{% endif -%}
+  {%- unless page_title contains shop.name %} &ndash; {{ shop.name }}{% endunless -%}
+</title>
+
+<link rel="canonical" href="{{ canonical_url }}">
+
+{%- comment -%}
+  SEO Meta Tags
+  - Articles: Use article-seo snippet (excerpt + structured data)
+  - Blogs: Use blog-seo snippet (metafields + structured data)
+  - Other pages: Default Shopify behavior
+{%- endcomment -%}
+
+{%- if template.name == 'article' -%}
+  {% render 'article-seo', article: article %}
+{%- elsif template.name == 'blog' -%}
+  {% render 'blog-seo', blog: blog %}
+{%- else -%}
+  {%- comment -%} Default meta tags for products, collections, pages, etc. {%- endcomment -%}
+  <meta property="og:site_name" content="{{ shop.name }}">
+  <meta property="og:url" content="{{ og_url }}">
+  <meta property="og:title" content="{{ og_title | escape }}">
+  <meta property="og:type" content="{{ og_type }}">
+  <meta property="og:description" content="{{ og_description | escape }}">
+
+  {%- if page_image -%}
+    <meta property="og:image" content="http:{{ page_image | image_url }}">
+    <meta property="og:image:secure_url" content="https:{{ page_image | image_url }}">
+    <meta property="og:image:width" content="{{ page_image.width }}">
+    <meta property="og:image:height" content="{{ page_image.height }}">
+  {%- endif -%}
+
+  {%- if request.page_type == 'product' -%}
+    <meta property="og:price:amount" content="{{ product.price | money_without_currency | strip_html }}">
+    <meta property="og:price:currency" content="{{ cart.currency.iso_code }}">
+  {%- endif -%}
+
+  {%- if settings.social_twitter_link != blank -%}
+    <meta name="twitter:site" content="{{ settings.social_twitter_link | split: 'twitter.com/' | last | prepend: '@' }}">
+  {%- endif -%}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ og_title | escape }}">
+  <meta name="twitter:description" content="{{ og_description | escape }}">
+
+  {% if page_description %}
+    <meta name="description" content="{{ page_description | escape }}">
+  {% endif %}
+{%- endif -%}
+```
+
+4. Click **Save**
+
+---
+
+## Category SEO Setup (Supabase)
+
+For blog/category pages to have custom SEO, you need to populate the `seo` JSONB field in your `blog_categories` table.
+
+### SEO Field Structure
+
+```json
+{
+  "title": "Your SEO Title | Brand Name",
+  "description": "Your meta description for this category (max 160 chars)",
+  "keywords": "keyword1, keyword2, keyword3"
+}
+```
+
+### Example SQL
+
+```sql
+UPDATE blog_categories
+SET seo = '{
+  "title": "Natural Remedies & Holistic Healing | Your Brand",
+  "description": "Discover natural remedies and holistic healing solutions. Learn about tallow moisturizers, CBD salves, and chemical-free skincare.",
+  "keywords": "natural remedies, holistic healing, tallow moisturizer"
+}'::jsonb
+WHERE slug = 'natural-remedies';
+```
+
+### Sync to Shopify
+
+After updating SEO in Supabase, sync to push the metafields:
+
+```bash
+python generator.py --shopify-sync-categories --force
+```
+
+This creates these Shopify metafields on each blog:
+- `seo.title`
+- `seo.description`
+- `seo.keywords`
+
+---
+
+## Verification
+
+### Check Article SEO
+
+1. Visit any article page on your store
+2. Right-click → **View Page Source**
+3. Search for `<meta name="description"` - should show your excerpt
+4. Search for `"BlogPosting"` - should show JSON-LD structured data
+
+### Check Blog SEO
+
+1. Visit a blog/category page (e.g., `/blogs/news`)
+2. Right-click → **View Page Source**
+3. Search for `<meta name="description"` - should show your SEO description
+4. Search for `"Blog"` in the JSON-LD section
+
+### Tools
+
+- [Google Rich Results Test](https://search.google.com/test/rich-results) - Verify structured data
+- [Facebook Sharing Debugger](https://developers.facebook.com/tools/debug/) - Test Open Graph tags
+- Browser extensions like "SEO META in 1 CLICK"
+
+---
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    meta-tags.liquid                          │
+│                                                              │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐   │
+│  │  Article?   │   │   Blog?     │   │  Other pages    │   │
+│  │             │   │             │   │                 │   │
+│  │  Render     │   │  Render     │   │  Default        │   │
+│  │  article-   │   │  blog-      │   │  Shopify        │   │
+│  │  seo.liquid │   │  seo.liquid │   │  meta tags      │   │
+│  └─────────────┘   └─────────────┘   └─────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+
+Article SEO Sources:
+  - Meta description → article.excerpt (synced from Supabase)
+  - Open Graph → article title, excerpt, image
+  - JSON-LD → BlogPosting schema
+
+Blog SEO Sources:
+  - Meta description → blog.metafields.seo.description (synced from Supabase)
+  - Fallback → first article's excerpt
+  - JSON-LD → Blog schema
+```
+
+---
+
+## File Reference
+
+| File | Purpose |
+|------|---------|
+| `snippets/article-seo.liquid` | SEO tags for article pages |
+| `snippets/blog-seo.liquid` | SEO tags for blog/category pages |
+| `snippets/meta-tags.liquid` | Routes to correct SEO snippet |
+| `layout/theme.liquid` | Includes meta-tags (no changes needed) |
+
 ---
 
 ## Troubleshooting
 
 ### Meta description not showing
 
-1. Check your theme's `layout/theme.liquid` for an existing `<meta name="description">` that might override yours
-2. Make sure the article has an excerpt/summary (check in Shopify admin)
-3. Clear your browser cache and Shopify's cache
+1. Check that the article has an excerpt in Supabase
+2. Verify the sync completed: `python generator.py --shopify-status`
+3. Clear browser cache and try again
+
+### Blog SEO not showing
+
+1. Check that `blog_categories.seo` is populated in Supabase
+2. Re-sync categories: `python generator.py --shopify-sync-categories --force`
+3. Verify metafields exist in Shopify Admin under the blog settings
 
 ### Duplicate meta descriptions
 
-Search your theme for all instances of `<meta name="description"` and consolidate them into one conditional block.
+Search your theme for all instances of `<meta name="description"` and ensure only the meta-tags.liquid version remains.
 
-### Summary/excerpt is empty
+### JSON-LD not appearing
 
-Ensure your Supabase posts have the `excerpt` field populated. The sync maps `excerpt` to Shopify's `summary` field.
+Check for JavaScript errors in browser console. The JSON-LD script may have a syntax error if special characters aren't properly escaped.
+
+---
+
+## Next Steps
+
+- [Shopify Theme CSS](shopify-theme-css.md) - Style the content blocks
+- [Getting Started with Shopify](getting-started-with-shopify.md) - Full setup guide
