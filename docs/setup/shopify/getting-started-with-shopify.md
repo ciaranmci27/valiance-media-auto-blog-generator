@@ -182,7 +182,17 @@ python generator.py --shopify-import-posts --force-pull
 
 ### Add Content Styling
 
-Copy the CSS from [shopify-theme-css.md](shopify-theme-css.md) into your theme's CSS file.
+Add the CSS to style your synced blog content:
+
+1. Go to Shopify Admin → Online Store → Themes → Edit code
+2. In `assets/`, click "Add a new asset" and upload [blog-styles.css](blog-styles.css)
+3. Add this to `layout/theme.liquid` in the `<head>`:
+
+```liquid
+{{ 'blog-styles.css' | asset_url | stylesheet_tag }}
+```
+
+The CSS inherits text colors from your theme, so it works with both light and dark themes automatically. See [shopify-theme-css.md](shopify-theme-css.md) for customization options.
 
 ### Enable SEO Meta Descriptions
 
